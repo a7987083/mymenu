@@ -26,7 +26,10 @@ jobs:
           git clone https://github.com/a7987083/UnitXP_SP3-Moonstone.git /tmp/source
           git -C /tmp/source checkout ceabd64e74898a50d329c3dec168f07c87d6c96e
 
-          rsync -a --delete --exclude='.git/' /tmp/source/ ./
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/workflows/' \
+            /tmp/source/ ./
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
