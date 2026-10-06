@@ -1,0 +1,45 @@
+name: Bootstrap mymenu from M6.13.3 baseline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/bootstrap-mymenu.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import exact source baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/a7987083/UnitXP_SP3-Moonstone.git /tmp/source
+          git -C /tmp/source checkout ceabd64e74898a50d329c3dec168f07c87d6c96e
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/source/. .
+          rm -rf .git
+          # Restore destination repository metadata.
+          git init
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch origin main
+          git checkout -B main origin/main
+
+          # Replace the worktree with the exact source snapshot while preserving destination .git.
+          rsync -a --delete --exclude='.git/' /tmp/source/ ./
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Import M6.13.3 dylib baseline from ceabd64"
+          git push origin HEAD:main
