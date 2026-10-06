@@ -1,0 +1,123 @@
+name: Build mymenu M6.13.3 dylib
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify imported baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f iosruntimepatchmenu/Makefile
+          test -f iosruntimepatchmenu/src/ZNUnifiedUI.mm
+          test -f iosruntimepatchmenu/src/ZNNativeHookRuntime.mm
+          test -f iosruntimepatchmenu/src/ZNRuntimeArgumentMarshaller.mm
+          grep -q 'ZonoePatchV03' iosruntimepatchmenu/Makefile
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew update
+          brew unlink openssl@1.1 || true
+          if [ -L /opt/homebrew/bin/openssl ]; then rm -f /opt/homebrew/bin/openssl; fi
+          brew install ldid cmake
+
+      - name: Install Theos
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Build pinned Dobby for iPhone arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p vendor
+          git clone https://github.com/jmpews/Dobby.git vendor/Dobby
+          cd vendor/Dobby
+          git checkout 5dfc8546954ce3b3198132ab13fddb89ee92cdd7
+          sed -i '' '/^import pipes$/d' scripts/platform_builder.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('include/dobby.h')
+          s = p.read_text()
+          old = '''#ifdef __cplusplus
+          extern "C" {
+          #endif
+
+          #include <stdbool.h>
+          #include <stdint.h>
+          #include <sys/types.h>
+          '''
+          new = '''#include <stdbool.h>
+          #include <stdint.h>
+          #include <sys/types.h>
+
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+          '''
+          if old not in s:
+              raise SystemExit('unexpected Dobby header layout')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          python3 scripts/platform_builder.py --platform iphoneos --arch arm64 --library_build_type static
+          test -f build/iphoneos/arm64/libdobby.a
+
+      - name: Build dylib
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd iosruntimepatchmenu
+          make clean
+          make FINALPACKAGE=1 2>&1 | tee build-mymenu.log
+          test -f .theos/obj/ZonoePatchV03.dylib
+          SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+          mkdir -p dist
+          OUT="dist/mymenu_M6.13.3_${SHORT_SHA}.dylib"
+          cp .theos/obj/ZonoePatchV03.dylib "$OUT"
+          shasum -a 256 "$OUT" | tee dist/SHA256.txt
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+
+      - name: Verify dylib
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd iosruntimepatchmenu
+          file "$OUT" | grep -q 'arm64'
+          otool -L "$OUT" | tee dist/OTool-L.txt
+          ! otool -L "$OUT" | grep -qi dobby
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mymenu-M6.13.3-build-log
+          path: iosruntimepatchmenu/build-mymenu.log
+          if-no-files-found: warn
+
+      - name: Upload dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: mymenu-M6.13.3-${{ env.SHORT_SHA }}
+          path: |
+            iosruntimepatchmenu/${{ env.OUT }}
+            iosruntimepatchmenu/dist/SHA256.txt
+            iosruntimepatchmenu/dist/OTool-L.txt
+          if-no-files-found: error
