@@ -1,0 +1,10 @@
+v0.5.5 Full Deferred Bootstrap contract
+
+Before the first launcher tap, the compiled ZonoPatch dylib may only install the cold floating launcher.
+PatchManager, DeveloperGate file-1 evaluation, IL2CPP resolver, Static Dispatch runtime refresh,
+Diagnostics/watchdog, Shared-Site probe wrappers, Feature UI, Builder UI, and menu controller startup
+must remain deferred.
+
+The first launcher tap transitions Cold -> Loading -> Ready exactly once. Existing module initialization
+order is preserved, Static Dispatch keeps its boot-safe OFF/original fallback, and the menu is revealed
+only after the deferred chain completes.

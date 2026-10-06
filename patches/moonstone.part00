@@ -1,0 +1,170 @@
+diff --strip-trailing-cr -ruN UnitXP_SP3-v89_original/unitxp_sp3/MOONSTONE_MARKS.md UnitXP_SP3-v89_src/unitxp_sp3/MOONSTONE_MARKS.md
+--- UnitXP_SP3-v89_original/unitxp_sp3/MOONSTONE_MARKS.md	1970-01-01 00:00:00.000000000 +0000
++++ UnitXP_SP3-v89_src/unitxp_sp3/MOONSTONE_MARKS.md	2026-08-01 15:17:22.913247083 +0000
+@@ -0,0 +1,57 @@
++# Moonstone-style ground markers
++
++This source tree adds seven ground markers to UnitXP_SP3 v89 while preserving the
++Lua API expected by `UnitXP_SP3_Addon`.
++
++## Lua API
++
++```lua
++-- Place/replace the selected color at the world position under the mouse cursor.
++-- On success returns x, y, z, normalizedColor.
++UnitXP("2DMark", "red")
++UnitXP("2DMark", "yellow")
++UnitXP("2DMark", "green")
++UnitXP("2DMark", "blue")
++UnitXP("2DMark", "purple")
++UnitXP("2DMark", "orange")
++UnitXP("2DMark", "white")
++
++-- Place/replace a marker received through addon communication.
++UnitXP("RemoteMark", "red", x, y, z, sender)
++
++-- Remove every marker.
++UnitXP("ClearAllMarks")
++
++-- Returns count, marksTable. Each entry has color/x/y/z fields.
++local count, marks = UnitXP("QueryMarks")
++```
++
++## Visual design
++
++The marker is an additive screen-space overlay inspired by Elder's Moonstone:
++
++- broad low-alpha outer moonlight;
++- narrower colored body;
++- pearly near-white center core;
++- soft top and bottom fades;
++- pulsing ground halo and ring;
++- physical world-size projection plus a pixel-width clamp, preventing the marker
++  from becoming a huge opaque wall at close range;
++- no line-of-sight occlusion, matching the existing 2D marker behavior.
++
++The implementation uses no external texture and allocates no persistent Direct3D
++resources. It renders with `DrawPrimitiveUP` and restores the complete D3D9 state
++before returning.
++
++## Source changes
++
++- `worldMarks.cpp` / `worldMarks.h`: placement, storage, rendering and query logic.
++- `dllmain.cpp`: UnitXP command handlers.
++- `sceneBegin_sceneEnd.cpp`: draw call before D3DXSprite combat text.
++- `Makefile`: adds `worldMarks.cpp`.
++
++## Build note
++
++The upstream Makefile expects the local directories `xwinSDK` and `d3d9x_headers`,
++which are not bundled in the v89 source archive. Use the same toolchain and
++dependency layout described by the upstream project before running `make`.
+diff --strip-trailing-cr -ruN UnitXP_SP3-v89_original/unitxp_sp3/Makefile UnitXP_SP3-v89_src/unitxp_sp3/Makefile
+--- UnitXP_SP3-v89_original/unitxp_sp3/Makefile	2026-03-29 02:32:08.000000000 +0000
++++ UnitXP_SP3-v89_src/unitxp_sp3/Makefile	2026-08-01 15:13:43.741239157 +0000
+@@ -40,6 +40,7 @@
+             utf8_to_utf16.cpp \
+             Vanilla1121_functions.cpp \
+             weather.cpp \
++            worldMarks.cpp \
+             worldText.cpp \
+             $(MINHOOK_DIR)/src/buffer.c \
+             $(MINHOOK_DIR)/src/hde/hde32.c \
+diff --strip-trailing-cr -ruN UnitXP_SP3-v89_original/unitxp_sp3/dllmain.cpp UnitXP_SP3-v89_src/unitxp_sp3/dllmain.cpp
+--- UnitXP_SP3-v89_original/unitxp_sp3/dllmain.cpp	2026-03-29 02:32:08.000000000 +0000
++++ UnitXP_SP3-v89_src/unitxp_sp3/dllmain.cpp	2026-08-01 15:13:42.705239120 +0000
+@@ -32,6 +32,7 @@
+ #include "polyfill.h"
+ #include "sceneBegin_sceneEnd.h"
+ #include "gameEvent.h"
++#include "worldMarks.h"
+ 
+ using namespace std;
+ 
+@@ -48,7 +49,72 @@
+ }
+ 
+ int __fastcall detoured_UnitXP(void* L) {
+-    if (lua_gettop(L) >= 2) {
++    const int argumentCount = lua_gettop(L);
++
++    // Ground marker commands are handled before the legacy >=2 argument gate because
++    // ClearAllMarks and QueryMarks intentionally take only the command name.
++    if (argumentCount >= 1) {
++        const string markCommand{ lua_tostring(L, 1) };
++
++        if (markCommand == "2DMark" && argumentCount >= 2) {
++            C3Vector placedPosition = {};
++            std::string normalizedColor{};
++            if (worldMarks::placeAtCursor(lua_tostring(L, 2), placedPosition, normalizedColor)) {
++                lua_pushnumber(L, placedPosition.x);
++                lua_pushnumber(L, placedPosition.y);
++                lua_pushnumber(L, placedPosition.z);
++                lua_pushstring(L, normalizedColor);
++                return 4;
++            }
++            return 0;
++        }
++        else if (markCommand == "RemoteMark" && argumentCount >= 5
++                 && lua_isnumber(L, 3) && lua_isnumber(L, 4) && lua_isnumber(L, 5)) {
++            C3Vector remotePosition = {};
++            remotePosition.x = static_cast<float>(lua_tonumber(L, 3));
++            remotePosition.y = static_cast<float>(lua_tonumber(L, 4));
++            remotePosition.z = static_cast<float>(lua_tonumber(L, 5));
++            lua_pushboolean(L, worldMarks::placeRemote(lua_tostring(L, 2), remotePosition));
++            return 1;
++        }
++        else if (markCommand == "ClearAllMarks") {
++            worldMarks::clearAll();
++            lua_pushboolean(L, true);
++            return 1;
++        }
++        else if (markCommand == "QueryMarks") {
++            worldMarks::MarkInfo marks[7] = {};
++            const std::size_t markCount = worldMarks::snapshot(marks, 7);
++
++            lua_pushnumber(L, static_cast<double>(markCount));
++            lua_newtable(L);
++            for (std::size_t i = 0; i < markCount; ++i) {
++                lua_pushnumber(L, static_cast<double>(i + 1));
++                lua_newtable(L);
++
++                lua_pushstring(L, "color");
++                lua_pushstring(L, marks[i].color);
++                lua_settable(L, -3);
++
++                lua_pushstring(L, "x");
++                lua_pushnumber(L, marks[i].position.x);
++                lua_settable(L, -3);
++
++                lua_pushstring(L, "y");
++                lua_pushnumber(L, marks[i].position.y);
++                lua_settable(L, -3);
++
++                lua_pushstring(L, "z");
++                lua_pushnumber(L, marks[i].position.z);
++                lua_settable(L, -3);
++
++                lua_settable(L, -3);
++            }
++            return 2;
++        }
++    }
++
++    if (argumentCount >= 2) {
+         string cmd{ lua_tostring(L, 1) };
+ 
+         if (cmd == "addCombatText" && lua_gettop(L) >= 6) {
+diff --strip-trailing-cr -ruN UnitXP_SP3-v89_original/unitxp_sp3/sceneBegin_sceneEnd.cpp UnitXP_SP3-v89_src/unitxp_sp3/sceneBegin_sceneEnd.cpp
+--- UnitXP_SP3-v89_original/unitxp_sp3/sceneBegin_sceneEnd.cpp	2026-03-29 02:32:08.000000000 +0000
++++ UnitXP_SP3-v89_src/unitxp_sp3/sceneBegin_sceneEnd.cpp	2026-08-01 15:13:43.233239139 +0000
+@@ -13,6 +13,7 @@
+ #include "utf8_to_utf16.h"
+ #include "Vanilla1121_functions.h"
+ #include "FPScap.h"
++#include "worldMarks.h"
+ 
+ static ID3DXFont* scene_fallback = NULL;
+ static ID3DXFont* scene_fallbackBIG = NULL;
+@@ -538,6 +539,10 @@
+             return;

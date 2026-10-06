@@ -1,0 +1,2 @@
+Validate the committed v0.5.6.2 Original Binary Activation Fix source.
+Expected: transform is idempotent, Protection V2 tests pass, exactly one cold-launch constructor remains, and final artifact is produced without another source commit.

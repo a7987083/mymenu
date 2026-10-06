@@ -1,0 +1,11 @@
+v0.5.6.1 First Activation Performance / Trace Contract
+
+1. Preserve v0.5.6 Full Deferred Bootstrap: before first launcher tap no Patch Runtime/Menu subsystem activation occurs.
+2. First launcher tap creates Documents/ZonoPatch-v0.5.6.1.log and records stage timings.
+3. Static Dispatch first performs owned-section-preflight-v1.
+4. Current Builder V3 outputs are discovered directly through __ZNDATA/__zndata.
+5. If any current owned section exists in the app bundle, unrelated images skip the legacy writable-segment compatibility scan.
+6. Legacy fallback scan remains available only when no owned __ZNDATA/__zndata exists anywhere in the app bundle.
+7. Static Dispatch logs refresh duration, bundle/direct/fallback counts, scanned fallback bytes/probes, logical/physical/shared counts.
+8. Protection V2, ZNF1, Static RVA Protection V1, Shared-Site owner stack, FeatureID semantics, and one-constructor deferred lifecycle remain unchanged.
+9. Device acceptance: first menu activation must no longer exhibit the prior ~30 second UI stall; if latency remains, the persistent trace is the source of truth for the blocking stage.

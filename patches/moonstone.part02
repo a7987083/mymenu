@@ -1,0 +1,170 @@
++    vertices.push_back(c);
++}
++
++void appendQuad(std::vector<Vertex>& vertices, const Vertex& a, const Vertex& b, const Vertex& c, const Vertex& d) {
++    appendTriangle(vertices, a, b, c);
++    appendTriangle(vertices, a, c, d);
++}
++
++float verticalEnvelope(float t) {
++    const float bottomFade = smoothStep(0.0f, 0.11f, t);
++    const float topFade = 1.0f - smoothStep(0.62f, 1.0f, t);
++    // A gentle middle swell mimics the breathing light of Elder's Moonstone.
++    const float middle = 0.90f + 0.10f * std::sin(t * static_cast<float>(M_PI));
++    return bottomFade * topFade * middle;
++}
++
++float horizontalEnvelope(float u) {
++    // Gaussian-like profile without requiring a texture.
++    return std::exp(-3.7f * u * u);
++}
++
++void appendBeamPass(
++    std::vector<Vertex>& vertices,
++    const ScreenPoint& base,
++    const ScreenPoint& top,
++    const ScreenVector& perpendicular,
++    float halfWidth,
++    const ColorDefinition& color,
++    float alpha,
++    float whiten,
++    int horizontalSlices,
++    int verticalSlices) {
++
++    const ScreenVector axis = {top.x - base.x, top.y - base.y};
++
++    for (int y = 0; y < verticalSlices; ++y) {
++        const float t0 = static_cast<float>(y) / static_cast<float>(verticalSlices);
++        const float t1 = static_cast<float>(y + 1) / static_cast<float>(verticalSlices);
++
++        const ScreenPoint center0 = {base.x + axis.x * t0, base.y + axis.y * t0};
++        const ScreenPoint center1 = {base.x + axis.x * t1, base.y + axis.y * t1};
++        const float vAlpha0 = verticalEnvelope(t0);
++        const float vAlpha1 = verticalEnvelope(t1);
++
++        for (int x = 0; x < horizontalSlices; ++x) {
++            const float u0 = -1.0f + 2.0f * static_cast<float>(x) / static_cast<float>(horizontalSlices);
++            const float u1 = -1.0f + 2.0f * static_cast<float>(x + 1) / static_cast<float>(horizontalSlices);
++            const float hAlpha0 = horizontalEnvelope(u0);
++            const float hAlpha1 = horizontalEnvelope(u1);
++
++            Vertex a = {
++                center0.x + perpendicular.x * halfWidth * u0,
++                center0.y + perpendicular.y * halfWidth * u0,
++                kScreenDepth, kRhw,
++                makeColor(color, alpha * vAlpha0 * hAlpha0, whiten)};
++            Vertex b = {
++                center1.x + perpendicular.x * halfWidth * u0,
++                center1.y + perpendicular.y * halfWidth * u0,
++                kScreenDepth, kRhw,
++                makeColor(color, alpha * vAlpha1 * hAlpha0, whiten)};
++            Vertex c = {
++                center1.x + perpendicular.x * halfWidth * u1,
++                center1.y + perpendicular.y * halfWidth * u1,
++                kScreenDepth, kRhw,
++                makeColor(color, alpha * vAlpha1 * hAlpha1, whiten)};
++            Vertex d = {
++                center0.x + perpendicular.x * halfWidth * u1,
++                center0.y + perpendicular.y * halfWidth * u1,
++                kScreenDepth, kRhw,
++                makeColor(color, alpha * vAlpha0 * hAlpha1, whiten)};
++            appendQuad(vertices, a, b, c, d);
++        }
++    }
++}
++
++void appendGlowDisc(
++    std::vector<Vertex>& vertices,
++    const ScreenPoint& center,
++    float radiusX,
++    float radiusY,
++    const ColorDefinition& color,
++    float centerAlpha,
++    float edgeAlpha,
++    int segments) {
++
++    for (int i = 0; i < segments; ++i) {
++        const float a0 = static_cast<float>(2.0 * M_PI) * static_cast<float>(i) / static_cast<float>(segments);
++        const float a1 = static_cast<float>(2.0 * M_PI) * static_cast<float>(i + 1) / static_cast<float>(segments);
++
++        Vertex c = {center.x, center.y, kScreenDepth, kRhw, makeColor(color, centerAlpha, 0.18f)};
++        Vertex p0 = {center.x + std::cos(a0) * radiusX, center.y + std::sin(a0) * radiusY,
++                     kScreenDepth, kRhw, makeColor(color, edgeAlpha)};
++        Vertex p1 = {center.x + std::cos(a1) * radiusX, center.y + std::sin(a1) * radiusY,
++                     kScreenDepth, kRhw, makeColor(color, edgeAlpha)};
++        appendTriangle(vertices, c, p0, p1);
++    }
++}
++
++void appendGlowRing(
++    std::vector<Vertex>& vertices,
++    const ScreenPoint& center,
++    float innerX,
++    float innerY,
++    float outerX,
++    float outerY,
++    const ColorDefinition& color,
++    float alpha,
++    int segments) {
++
++    for (int i = 0; i < segments; ++i) {
++        const float a0 = static_cast<float>(2.0 * M_PI) * static_cast<float>(i) / static_cast<float>(segments);
++        const float a1 = static_cast<float>(2.0 * M_PI) * static_cast<float>(i + 1) / static_cast<float>(segments);
++
++        Vertex inner0 = {center.x + std::cos(a0) * innerX, center.y + std::sin(a0) * innerY,
++                         kScreenDepth, kRhw, makeColor(color, alpha, 0.28f)};
++        Vertex inner1 = {center.x + std::cos(a1) * innerX, center.y + std::sin(a1) * innerY,
++                         kScreenDepth, kRhw, makeColor(color, alpha, 0.28f)};
++        Vertex outer1 = {center.x + std::cos(a1) * outerX, center.y + std::sin(a1) * outerY,
++                         kScreenDepth, kRhw, makeColor(color, 0.0f)};
++        Vertex outer0 = {center.x + std::cos(a0) * outerX, center.y + std::sin(a0) * outerY,
++                         kScreenDepth, kRhw, makeColor(color, 0.0f)};
++        appendQuad(vertices, inner0, inner1, outer1, outer0);
++    }
++}
++
++bool cursorRay(C3Vector& origin, C3Vector& direction) {
++    const HWND window = vanilla1121_gameWindow();
++    if (window == NULL) {
++        return false;
++    }
++
++    POINT cursor = {};
++    if (!GetCursorPos(&cursor) || !ScreenToClient(window, &cursor)) {
++        return false;
++    }
++
++    const RECT client = vanilla1121_gameClientRect();
++    const float width = static_cast<float>(client.right - client.left);
++    const float height = static_cast<float>(client.bottom - client.top);
++    if (width <= 1.0f || height <= 1.0f) {
++        return false;
++    }
++
++    const uint32_t camera = vanilla1121_getCamera();
++    if (camera == 0 || (camera & 1) != 0) {
++        return false;
++    }
++
++    origin = vanilla1121_getCameraPosition(camera);
++    C3Vector forward = vanilla1121_getCameraForwardVector(camera);
++    C3Vector right = vanilla1121_getCameraRightVector(camera);
++    C3Vector up = vanilla1121_getCameraUpVector(camera);
++    vectorNormalize(forward);
++    vectorNormalize(right);
++    vectorNormalize(up);
++
++    float horizontalFov = vanilla1121_getCameraFoV(camera);
++    float aspect = vanilla1121_getCameraAspectRatio(camera);
++    if (!std::isfinite(horizontalFov) || horizontalFov < 0.1f || horizontalFov > 3.0f) {
++        horizontalFov = 1.0f;
++    }
++    if (!std::isfinite(aspect) || aspect < 0.5f || aspect > 4.0f) {
++        aspect = width / height;
++    }
++
++    const float verticalFov = 2.0f * std::atan(std::tan(horizontalFov * 0.5f) / aspect);
++    float normalizedX = (2.0f * (static_cast<float>(cursor.x) + 0.5f) / width) - 1.0f;
++    float normalizedY = 1.0f - (2.0f * (static_cast<float>(cursor.y) + 0.5f) / height);
++
++    // Camera basis direction differs between some 1.12 client builds. Determine the

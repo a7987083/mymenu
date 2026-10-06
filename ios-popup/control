@@ -1,0 +1,6 @@
+Package: com.taiyang.typopup
+Name: TYPopup
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: Minimal Objective-C popup bridge dylib
+Maintainer: TaiYang

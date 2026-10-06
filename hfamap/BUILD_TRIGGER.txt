@@ -1,0 +1,3 @@
+Trigger HFAMapUniversal Theos build.
+
+Purpose: start GitHub Actions validation build.

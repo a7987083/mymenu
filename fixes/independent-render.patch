@@ -1,0 +1,29 @@
+--- orig/sceneBegin_sceneEnd.cpp
++++ new/sceneBegin_sceneEnd.cpp
+@@ -500,6 +500,15 @@
+         scene_isPresenting = false;
+     }
+ 
++    // Ground markers are independent of the optional D3DX combat-text renderer.
++    // Draw once on the presenting scene while the game D3D scene is still open.
++    if (*reinterpret_cast<uint32_t*>(CGxDevice + 0x3a38) != NULL) {
++        LPDIRECT3DDEVICE9 markDevice = reinterpret_cast<LPDIRECT3DDEVICE9>(vanilla1121_d3dDevice(CGxDevice));
++        if (markDevice != NULL && (reinterpret_cast<uintptr_t>(markDevice) & 1) == 0) {
++            worldMarks::draw(markDevice);
++        }
++    }
++
+     if (scene_delayDetouredSceneEnd <= 0
+         && *reinterpret_cast<uint32_t*>(CGxDevice + 0x3a38) != NULL
+         && scene_isEnabled == true) {
+@@ -539,10 +548,6 @@
+             return;
+         }
+ 
+-        // Draw ground markers before D3DXSprite begins. worldMarks::draw() saves and
+-        // restores the complete Direct3D state, so it does not disturb combat text.
+-        worldMarks::draw(scene_lastDXdevice);
+-
+         // First iteration does not draw but only update RECT for overlapping test
+         for (auto it = critsGroups.begin(); it != critsGroups.end();) {
+             int update = -1;

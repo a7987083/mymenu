@@ -1,0 +1,7 @@
+M4.9 Generic Invoke + Runtime Editable Args contract
+- /0 keeps direct execution behavior.
+- /1-/8 runtime actions prompt with saved defaults.
+- Users may change any subset of arguments for the current invocation.
+- Empty string remains a value, not a missing-argument sentinel.
+- One-shot edited values do not rewrite embedded Runtime Action defaults.
+- Invocation continues through ZNIL2CPPInvokeEngine so M4.8 return capture remains active.

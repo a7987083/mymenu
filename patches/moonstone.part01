@@ -1,0 +1,170 @@
+         }
+ 
++        // Draw ground markers before D3DXSprite begins. worldMarks::draw() saves and
++        // restores the complete Direct3D state, so it does not disturb combat text.
++        worldMarks::draw(scene_lastDXdevice);
++
+         // First iteration does not draw but only update RECT for overlapping test
+         for (auto it = critsGroups.begin(); it != critsGroups.end();) {
+             int update = -1;
+diff --strip-trailing-cr -ruN UnitXP_SP3-v89_original/unitxp_sp3/worldMarks.cpp UnitXP_SP3-v89_src/unitxp_sp3/worldMarks.cpp
+--- UnitXP_SP3-v89_original/unitxp_sp3/worldMarks.cpp	1970-01-01 00:00:00.000000000 +0000
++++ UnitXP_SP3-v89_src/unitxp_sp3/worldMarks.cpp	2026-08-01 15:13:12.793238038 +0000
+@@ -0,0 +1,542 @@
++#define _USE_MATH_DEFINES
++
++#include "worldMarks.h"
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <cstdint>
++#include <string>
++#include <vector>
++
++#include <Windows.h>
++
++namespace worldMarks {
++namespace {
++
++constexpr std::size_t kColorCount = 7;
++constexpr float kMaxPlacementDistance = 120.0f;
++constexpr float kBeamHeight = 17.0f;
++constexpr float kBeamRadiusWorld = 0.78f;
++constexpr float kMinimumHalfWidthPixels = 4.5f;
++constexpr float kMaximumHalfWidthPixels = 34.0f;
++constexpr float kScreenDepth = 0.0f;
++constexpr float kRhw = 1.0f;
++
++struct ColorDefinition {
++    const char* name;
++    uint8_t r;
++    uint8_t g;
++    uint8_t b;
++};
++
++constexpr std::array<ColorDefinition, kColorCount> kColors = {{
++    {"red",    255,  72,  72},
++    {"yellow", 255, 220,  78},
++    {"green",   80, 255, 120},
++    {"blue",    78, 165, 255},
++    {"purple", 190,  92, 255},
++    {"orange", 255, 138,  48},
++    // Slight blue tint makes the white marker read as moonlight instead of smoke.
++    {"white",  205, 226, 255},
++}};
++
++struct MarkSlot {
++    bool active = false;
++    C3Vector position = {};
++};
++
++std::array<MarkSlot, kColorCount> gMarks = {};
++
++struct ScreenPoint {
++    float x = -1.0f;
++    float y = -1.0f;
++};
++
++struct ScreenVector {
++    float x = 0.0f;
++    float y = 0.0f;
++};
++
++struct Vertex {
++    float x;
++    float y;
++    float z;
++    float rhw;
++    D3DCOLOR color;
++};
++
++constexpr DWORD kVertexFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE;
++
++float clampFloat(float value, float low, float high) {
++    return std::max(low, std::min(value, high));
++}
++
++float smoothStep(float edge0, float edge1, float x) {
++    if (edge0 == edge1) {
++        return x < edge0 ? 0.0f : 1.0f;
++    }
++    float t = clampFloat((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
++    return t * t * (3.0f - 2.0f * t);
++}
++
++std::string lowerAscii(std::string value) {
++    for (char& c : value) {
++        if (c >= 'A' && c <= 'Z') {
++            c = static_cast<char>(c - 'A' + 'a');
++        }
++    }
++    return value;
++}
++
++int colorIndex(const std::string& colorName) {
++    const std::string normalized = lowerAscii(colorName);
++    for (std::size_t i = 0; i < kColors.size(); ++i) {
++        if (normalized == kColors[i].name) {
++            return static_cast<int>(i);
++        }
++    }
++    return -1;
++}
++
++C3Vector add(const C3Vector& a, const C3Vector& b) {
++    C3Vector result = {};
++    result.x = a.x + b.x;
++    result.y = a.y + b.y;
++    result.z = a.z + b.z;
++    return result;
++}
++
++C3Vector scale(const C3Vector& value, float factor) {
++    C3Vector result = {};
++    result.x = value.x * factor;
++    result.y = value.y * factor;
++    result.z = value.z * factor;
++    return result;
++}
++
++ScreenPoint project(const C3Vector& value) {
++    C3Vector mutableValue = value;
++    C3Vector projected = vanilla1121_worldToScreen(mutableValue);
++    ScreenPoint result = {};
++    result.x = projected.x;
++    result.y = projected.y;
++    return result;
++}
++
++bool validScreenPoint(const ScreenPoint& value) {
++    return std::isfinite(value.x) && std::isfinite(value.y) && value.x >= 0.0f && value.y >= 0.0f;
++}
++
++float screenLength(const ScreenVector& value) {
++    return std::sqrt(value.x * value.x + value.y * value.y);
++}
++
++ScreenVector normalizeScreen(const ScreenVector& value) {
++    ScreenVector result = value;
++    const float length = screenLength(value);
++    if (length > 0.0001f) {
++        result.x /= length;
++        result.y /= length;
++    }
++    return result;
++}
++
++D3DCOLOR makeColor(const ColorDefinition& color, float alpha, float whiten = 0.0f) {
++    whiten = clampFloat(whiten, 0.0f, 1.0f);
++    const float inv = 1.0f - whiten;
++    const uint8_t r = static_cast<uint8_t>(clampFloat(color.r * inv + 255.0f * whiten, 0.0f, 255.0f));
++    const uint8_t g = static_cast<uint8_t>(clampFloat(color.g * inv + 255.0f * whiten, 0.0f, 255.0f));
++    const uint8_t b = static_cast<uint8_t>(clampFloat(color.b * inv + 255.0f * whiten, 0.0f, 255.0f));
++    const uint8_t a = static_cast<uint8_t>(clampFloat(alpha, 0.0f, 255.0f));
++    return D3DCOLOR_ARGB(a, r, g, b);
++}
++
++void appendTriangle(std::vector<Vertex>& vertices, const Vertex& a, const Vertex& b, const Vertex& c) {
++    vertices.push_back(a);
++    vertices.push_back(b);

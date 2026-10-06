@@ -1,0 +1,7 @@
+Package: com.taiyang.hfamapuniversal
+Name: HFAMapUniversal
+Version: 1.4.5-dev
+Architecture: iphoneos-arm
+Description: HFAMapUniversal Theos migration build
+Maintainer: TaiYang
+Author: TaiYang

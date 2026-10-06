@@ -1,0 +1,170 @@
++    // screen orientation from the game's own world-to-screen function instead of
++    // assuming a handedness.
++    const C3Vector probeCenter = add(origin, scale(forward, 20.0f));
++    const ScreenPoint centerScreen = project(probeCenter);
++    const ScreenPoint rightScreen = project(add(probeCenter, scale(right, 4.0f)));
++    const ScreenPoint upScreen = project(add(probeCenter, scale(up, 4.0f)));
++    if (validScreenPoint(centerScreen) && validScreenPoint(rightScreen) && rightScreen.x < centerScreen.x) {
++        normalizedX = -normalizedX;
++    }
++    if (validScreenPoint(centerScreen) && validScreenPoint(upScreen) && upScreen.y > centerScreen.y) {
++        normalizedY = -normalizedY;
++    }
++
++    direction = forward;
++    direction = add(direction, scale(right, normalizedX * std::tan(horizontalFov * 0.5f)));
++    direction = add(direction, scale(up, normalizedY * std::tan(verticalFov * 0.5f)));
++    vectorNormalize(direction);
++    return !vectorAlmostZero(direction);
++}
++
++bool cursorWorldIntersection(C3Vector& intersection) {
++    C3Vector origin = {};
++    C3Vector direction = {};
++    if (!cursorRay(origin, direction)) {
++        return false;
++    }
++
++    const C3Vector end = add(origin, scale(direction, kMaxPlacementDistance));
++    float distance = 1.0f;
++    C3Vector hit = {};
++    if (!CWorld_Intersect(&origin, &end, &hit, &distance, 0x100111)) {
++        return false;
++    }
++    if (!std::isfinite(distance) || distance < 0.0f || distance > 1.0f) {
++        return false;
++    }
++
++    // Keep the overlay slightly above the terrain to avoid its ground halo appearing
++    // visually buried when the camera is nearly level with the ground.
++    hit.z += 0.035f;
++    intersection = hit;
++    return true;
++}
++
++float projectedHalfWidth(const C3Vector& position, const ScreenPoint& base) {
++    uint32_t camera = vanilla1121_getCamera();
++    C3Vector right = vanilla1121_getCameraRightVector(camera);
++    right.z = 0.0f;
++    if (vectorAlmostZero(right)) {
++        right.x = 1.0f;
++        right.y = 0.0f;
++        right.z = 0.0f;
++    }
++    vectorNormalize(right);
++
++    const ScreenPoint side = project(add(position, scale(right, kBeamRadiusWorld)));
++    float width = kMinimumHalfWidthPixels;
++    if (validScreenPoint(side)) {
++        width = std::abs(side.x - base.x);
++    }
++    return clampFloat(width, kMinimumHalfWidthPixels, kMaximumHalfWidthPixels);
++}
++
++void appendMarkGeometry(std::vector<Vertex>& vertices, std::size_t index, const MarkSlot& mark) {
++    const ColorDefinition& color = kColors[index];
++    C3Vector topWorld = mark.position;
++    topWorld.z += kBeamHeight;
++
++    const ScreenPoint base = project(mark.position);
++    const ScreenPoint top = project(topWorld);
++    if (!validScreenPoint(base) || !validScreenPoint(top)) {
++        return;
++    }
++
++    ScreenVector axis = {top.x - base.x, top.y - base.y};
++    const float axisLength = screenLength(axis);
++    if (axisLength < 2.0f) {
++        return;
++    }
++    ScreenVector perpendicular = normalizeScreen({-axis.y, axis.x});
++
++    const float time = static_cast<float>(GetTickCount() & 0x00ffffff) / 1000.0f;
++    const float pulse = 0.5f + 0.5f * std::sin(time * 1.65f + static_cast<float>(index) * 0.7f);
++    const float halfWidth = projectedHalfWidth(mark.position, base) * (0.975f + pulse * 0.05f);
++    const float alphaScale = 0.90f + pulse * 0.10f;
++
++    // The order is intentional: soft outer moonlight, colored body, then a narrow
++    // near-white core. Additive blending produces the pearly Elder's Moonstone look.
++    appendBeamPass(vertices, base, top, perpendicular, halfWidth * 1.65f, color,
++                   28.0f * alphaScale, 0.08f, 12, 7);
++    appendBeamPass(vertices, base, top, perpendicular, halfWidth * 0.88f, color,
++                   58.0f * alphaScale, 0.20f, 12, 7);
++    appendBeamPass(vertices, base, top, perpendicular, std::max(1.4f, halfWidth * 0.16f), color,
++                   118.0f * alphaScale, 0.70f, 4, 7);
++
++    const float haloX = clampFloat(halfWidth * 2.25f, 13.0f, 72.0f);
++    const float haloY = clampFloat(halfWidth * 0.62f, 4.0f, 19.0f);
++    appendGlowDisc(vertices, base, haloX * 0.72f, haloY * 0.72f, color, 38.0f * alphaScale, 0.0f, 28);
++    appendGlowRing(vertices, base, haloX * 0.54f, haloY * 0.54f,
++                   haloX, haloY, color, 62.0f * alphaScale, 32);
++}
++
++} // namespace
++
++bool placeAtCursor(const std::string& colorName, C3Vector& placedPosition, std::string& normalizedColor) {
++    const int index = colorIndex(colorName);
++    if (index < 0) {
++        return false;
++    }
++
++    C3Vector hit = {};
++    if (!cursorWorldIntersection(hit)) {
++        return false;
++    }
++
++    gMarks[static_cast<std::size_t>(index)].active = true;
++    gMarks[static_cast<std::size_t>(index)].position = hit;
++    placedPosition = hit;
++    normalizedColor = kColors[static_cast<std::size_t>(index)].name;
++    return true;
++}
++
++bool placeRemote(const std::string& colorName, const C3Vector& position) {
++    const int index = colorIndex(colorName);
++    if (index < 0 || !std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) {
++        return false;
++    }
++    gMarks[static_cast<std::size_t>(index)].active = true;
++    gMarks[static_cast<std::size_t>(index)].position = position;
++    return true;
++}
++
++void clearAll() {
++    for (MarkSlot& mark : gMarks) {
++        mark.active = false;
++        mark.position = {};
++    }
++}
++
++std::size_t count() {
++    std::size_t result = 0;
++    for (const MarkSlot& mark : gMarks) {
++        if (mark.active) {
++            ++result;
++        }
++    }
++    return result;
++}
++
++std::size_t snapshot(MarkInfo* output, std::size_t capacity) {
++    if (output == nullptr || capacity == 0) {
++        return 0;
++    }
++
++    std::size_t written = 0;
++    for (std::size_t i = 0; i < gMarks.size() && written < capacity; ++i) {
++        if (!gMarks[i].active) {
++            continue;
++        }
++        output[written].color = kColors[i].name;
++        output[written].position = gMarks[i].position;
++        ++written;
++    }
++    return written;
++}
++
++void draw(IDirect3DDevice9* device) {
++    if (device == nullptr || count() == 0) {
++        return;
++    }

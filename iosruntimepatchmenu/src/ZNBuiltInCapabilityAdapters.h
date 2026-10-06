@@ -1,0 +1,8 @@
+#import <Foundation/Foundation.h>
+NS_ASSUME_NONNULL_BEGIN
+FOUNDATION_EXPORT NSString * const ZNCapabilityStaticPatchIdentifier;
+FOUNDATION_EXPORT NSString * const ZNCapabilityRuntimeMethodIdentifier;
+FOUNDATION_EXPORT NSString * const ZNCapabilityNativeHookIdentifier;
+FOUNDATION_EXPORT NSString * const ZNCapabilityDirectNativeCallIdentifier;
+FOUNDATION_EXPORT void ZNRegisterBuiltInCapabilityAdapters(void);
+NS_ASSUME_NONNULL_END

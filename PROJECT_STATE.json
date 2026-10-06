@@ -1,0 +1,74 @@
+{
+  "schema_version": 25,
+  "project": "ZonoPatch Runtime Patch Menu",
+  "repository": "a7987083/UnitXP_SP3-Moonstone",
+  "version": "0.5.8-dev",
+  "milestone": "M5.8.3",
+  "phase": "slider-authored-max-action-identity",
+  "phase_status": "source-ci-binary-artifact-verified-device-validation-pending",
+  "branch": "fix/m5.8.3-slider-max-action-identity",
+  "baseline": "59eebc1d21c7a6894f27a5480bf8100bbf4f2094",
+  "business_code_ci_anchor": "8fcdb5af93e2cf8884f2e5189acad3acf744abcc",
+  "runtime_controls": {
+    "renderer_owner": "ZNM58UnifiedControlRuntime",
+    "additional_runtime_renderer_added": false,
+    "ui_level_title_method_collapse": false,
+    "exact_record_dedupe_owner": "ZNRuntimeActionRuntime",
+    "distinct_same_method_builder_actions_preserved": true,
+    "fixed_action_execute_when_exposed_zero": true,
+    "slider_live_value_label": true,
+    "slider_value_changed_invokes": false,
+    "slider_release_invokes_once": true,
+    "runtime_value_persistence_key": "zonoe.m5.8.2.runtime-values.v1",
+    "runtime_value_identity": "actionID + canonicalIdentity",
+    "device_verified": false
+  },
+  "slider_authoring": {
+    "only_slider_requires_generation_value": true,
+    "builder_argument_live_sync": true,
+    "required_value": "finite > 0",
+    "generated_min": 0,
+    "generated_max": "authored argument value",
+    "generated_step": 1,
+    "generated_default": "authored argument value",
+    "number_fixed_switch_button_new_value_requirement": false
+  },
+  "abi": {
+    "static_patch_entry_bytes": 128,
+    "runtime_method_call_entry_bytes": 64,
+    "changed_in_m5_8_3": false
+  },
+  "build": {
+    "workflow": "Build Runtime Patch Menu v0.5.8 M5.8.3 Slider Max Action Identity",
+    "first_run_id": 36363946557,
+    "first_run_build_result": "success",
+    "first_run_failure": "binary verify false negative: strings -a cannot reliably assert Chinese Objective-C NSString",
+    "final_business_code_run_id": 36364086245,
+    "job_id": 108746902686,
+    "result": "success",
+    "compiled": true,
+    "binary_verified": true,
+    "artifact_uploaded": true
+  },
+  "artifact": {
+    "name": "ZonoPatch-v0.5.8-M5.8.3-SliderMax-ActionIdentity",
+    "id": 10947010903,
+    "archive_digest": "sha256:344f603bc385d8d86e044b37709ce14f76282c366fdaa49cf71ee2889f0b30cc",
+    "dylib_name": "ZonoPatch_v0.5.8_M5.8.3_SliderMax_ActionIdentity.dylib"
+  },
+  "device_acceptance_pending": [
+    "Slider authored with 31 has maximum exactly 31",
+    "empty or invalid Slider value is rejected at generation",
+    "Number and Fixed do not require authored value at generation",
+    "same-method Fixed Number Slider actions all remain visible",
+    "fixed action Execute works",
+    "Number input plus Execute works",
+    "Slider live value and single release invoke regression",
+    "runtime value persistence after restart",
+    "Runtime-only generation regression",
+    "Static controls regression"
+  ],
+  "next_phase": "m5.8.3-device-acceptance",
+  "next_task": "Install M5.8.3 and validate Slider authored max plus distinct same-method Fixed/Number/Slider actions before Phase 2 cleanup.",
+  "captured_at": "2026-09-28"
+}
