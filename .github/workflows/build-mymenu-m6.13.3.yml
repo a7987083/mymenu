@@ -89,8 +89,9 @@ jobs:
           test -f .theos/obj/ZonoePatchV03.dylib
           SHORT_SHA="$(git rev-parse --short=7 HEAD)"
           mkdir -p dist
-          OUT="dist/mymenu_M6.13.3_${SHORT_SHA}.dylib"
+          OUT="dist/mymenu_M6.13.3_${SHORT_SHA}_signed.dylib"
           cp .theos/obj/ZonoePatchV03.dylib "$OUT"
+          ldid -S "$OUT"
           shasum -a 256 "$OUT" | tee dist/SHA256.txt
           echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
           echo "OUT=$OUT" >> "$GITHUB_ENV"
@@ -103,6 +104,8 @@ jobs:
           file "$OUT" | grep -q 'arm64'
           otool -L "$OUT" | tee dist/OTool-L.txt
           ! otool -L "$OUT" | grep -qi dobby
+          ldid -e "$OUT" > dist/entitlements.plist || true
+          test -s "$OUT"
 
       - name: Upload build log
         if: always()
