@@ -26,16 +26,6 @@ jobs:
           git clone https://github.com/a7987083/UnitXP_SP3-Moonstone.git /tmp/source
           git -C /tmp/source checkout ceabd64e74898a50d329c3dec168f07c87d6c96e
 
-          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp -a /tmp/source/. .
-          rm -rf .git
-          # Restore destination repository metadata.
-          git init
-          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          git fetch origin main
-          git checkout -B main origin/main
-
-          # Replace the worktree with the exact source snapshot while preserving destination .git.
           rsync -a --delete --exclude='.git/' /tmp/source/ ./
 
           git config user.name "github-actions[bot]"
