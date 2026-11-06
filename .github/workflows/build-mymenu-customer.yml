@@ -1,0 +1,51 @@
+name: Build mymenu Customer UI shell
+on:
+  push:
+    branches:
+      - customer/m6.13-client
+    paths:
+      - 'customer/**'
+      - '.github/workflows/build-mymenu-customer.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Theos and signing tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install ldid
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+      - name: Compile Customer UI shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd customer
+          make FINALPACKAGE=1 2>&1 | tee build.log
+          test -s .theos/obj/MyMenuCustomer.dylib
+          mkdir -p dist
+          cp .theos/obj/MyMenuCustomer.dylib dist/MyMenuCustomer_UI_ONLY.dylib
+          ldid -S dist/MyMenuCustomer_UI_ONLY.dylib
+          file dist/MyMenuCustomer_UI_ONLY.dylib
+          shasum -a 256 dist/MyMenuCustomer_UI_ONLY.dylib > dist/SHA256.txt
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mymenu-customer-build-log
+          path: customer/build.log
+          if-no-files-found: warn
+      - name: Upload UI-only test dylib
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mymenu-customer-ui-only-not-functional
+          path: |
+            customer/dist/MyMenuCustomer_UI_ONLY.dylib
+            customer/dist/SHA256.txt
