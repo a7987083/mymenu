@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
+#include <cmath>
 #import "ZNCustomerAdapter.h"
 
 @interface ZNCustomerWindow : UIWindow
