@@ -6,6 +6,7 @@ on:
       - customer/clean-runtime-rewrite
     paths:
       - 'customer/**'
+      - 'iosruntimepatchmenu/src/**'
       - '.github/workflows/build-mymenu-customer.yml'
   workflow_dispatch:
 
