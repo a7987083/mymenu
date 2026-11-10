@@ -1,6 +1,5 @@
 #import "ZNCustomerAdapter.h"
 #import "../iosruntimepatchmenu/src/ZNStaticDispatchRuntime.h"
-#import <mach-o/dyld.h>
 
 @implementation ZNCustomerItem
 @end
@@ -9,7 +8,6 @@
 // stay in the audited developer runtime. Never write executable memory here.
 @implementation ZNCustomerAdapter {
     NSDictionary<NSString *, ZNStaticPatchRecord *> *_staticByIdentifier;
-    uint32_t _lastImageCount;
 }
 + (instancetype)shared {
     static ZNCustomerAdapter *instance;
@@ -20,11 +18,9 @@
 - (NSArray<ZNCustomerItem *> *)snapshot {
     @synchronized(self) {
         ZNStaticDispatchRuntime *runtime=[ZNStaticDispatchRuntime sharedRuntime];
-        uint32_t count=_dyld_image_count();
-        if(_lastImageCount!=count || !_staticByIdentifier) {
-            [runtime refresh];
-            _lastImageCount=count;
-        }
+        // Runtime owns the discovery cache and image invalidation. The adapter
+        // must not maintain a second, weaker cache keyed only by image count.
+        [runtime refresh];
         NSMutableArray<ZNCustomerItem *> *items=[NSMutableArray array];
         NSMutableDictionary<NSString *,ZNStaticPatchRecord *> *mapping=[NSMutableDictionary dictionary];
         for(ZNStaticPatchRecord *record in runtime.records) {
