@@ -15,10 +15,26 @@
 @interface ZNCustomerController : UIViewController
 @property(nonatomic,strong) UIStackView *rows;
 @property(nonatomic,strong) NSMutableDictionary<NSString *, NSString *> *numberDrafts;
+@property(nonatomic,weak) UIViewController *gameOrientationController;
 @property(nonatomic,copy) void (^onClose)(void);
 @property(nonatomic,copy) void (^onMove)(void);
 @end
 @implementation ZNCustomerController
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    UIViewController *game=self.gameOrientationController;
+    if(!game || game==self)return UIInterfaceOrientationMaskAll;
+    // Follow the host game's controller, never impose an independent overlay mask.
+    return game.supportedInterfaceOrientations;
+}
+- (BOOL)shouldAutorotate {
+    UIViewController *game=self.gameOrientationController;
+    return game && game!=self ? game.shouldAutorotate : YES;
+}
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation {
+    UIViewController *game=self.gameOrientationController;
+    return game && game!=self ? game.preferredInterfaceOrientationForPresentation :
+        [super preferredInterfaceOrientationForPresentation];
+}
 - (void)loadView {
     UIView *view=[UIView new];
     view.backgroundColor=[UIColor colorWithRed:.035 green:.045 blue:.12 alpha:.96];
@@ -281,6 +297,11 @@
         self.window.hidden=YES;self.window.rootViewController=nil;self.window=nil;self.controller=nil;self.moved=NO;
     }
     self.source=host;
+    if(self.controller) {
+        self.controller.gameOrientationController=host.rootViewController;
+        if(@available(iOS 16.0,*))
+            [self.controller setNeedsUpdateOfSupportedInterfaceOrientations];
+    }
     if(!self.window){
         ZNCustomerWindow *w=nil;
         if(@available(iOS 13.0,*)) w=[[ZNCustomerWindow alloc]initWithWindowScene:host.windowScene];
@@ -288,6 +309,7 @@
         w.windowLevel=UIWindowLevelAlert-1;
         w.backgroundColor=UIColor.clearColor;
         self.controller=[ZNCustomerController new];
+        self.controller.gameOrientationController=host.rootViewController;
         __weak ZNCustomerHost *weakSelf=self;
         self.controller.onClose=^{weakSelf.window.hidden=YES;};
         self.controller.onMove=^{
