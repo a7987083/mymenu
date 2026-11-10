@@ -34,7 +34,6 @@
     stroke.startPoint=CGPointMake(0,0);
     stroke.endPoint=CGPointMake(1,1);
     stroke.frame=self.view.bounds;
-    stroke.autoresizingMask=kCALayerWidthSizable|kCALayerHeightSizable;
     CAShapeLayer *mask=[CAShapeLayer layer];
     mask.fillColor=UIColor.clearColor.CGColor;
     mask.strokeColor=UIColor.whiteColor.CGColor;
@@ -204,10 +203,11 @@
         w.windowLevel=UIWindowLevelAlert-1;
         w.backgroundColor=UIColor.clearColor;
         self.controller=[ZNCustomerController new];
-        __weak typeof(self) weakSelf=self;
+        __weak ZNCustomerHost *weakSelf=self;
         self.controller.onClose=^{weakSelf.window.hidden=YES;};
         self.controller.onMove=^{
-            typeof(self) owner=weakSelf;
+            ZNCustomerHost *owner=weakSelf;
+            if(!owner)return;
             CGRect bounds=owner.source.bounds,frame=owner.window.frame;
             if(bounds.size.width<=0||bounds.size.height<=0)return;
             owner.normalizedCenter=CGPointMake(CGRectGetMidX(frame)/bounds.size.width,CGRectGetMidY(frame)/bounds.size.height);
@@ -235,7 +235,14 @@
 @end
 @implementation ZNCustomerBootstrap
 + (void)install {
-    UIWindow *window=UIApplication.sharedApplication.keyWindow;
+    UIWindow *window=nil;
+    for(UIScene *scene in UIApplication.sharedApplication.connectedScenes){
+        if(![scene isKindOfClass:UIWindowScene.class] || scene.activationState!=UISceneActivationStateForegroundActive)continue;
+        for(UIWindow *candidate in ((UIWindowScene *)scene).windows){
+            if(candidate.isKeyWindow && candidate.windowLevel==UIWindowLevelNormal){window=candidate;break;}
+        }
+        if(window)break;
+    }
     if(!window||window.windowLevel!=UIWindowLevelNormal)return;
     for(UIGestureRecognizer *g in window.gestureRecognizers)
         if([g.name isEqualToString:@"mymenu.customer.open"])return;
