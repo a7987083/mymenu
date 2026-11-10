@@ -29,7 +29,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy,readonly) NSString *lastStatus;
 - (void)refresh;
 - (BOOL)executeRecord:(ZNRuntimeMethodActionRecord *)record error:(NSString * _Nullable * _Nullable)error;
-- (BOOL)executeRecord:(ZNRuntimeMethodActionRecord *)record argumentIndex:(NSUInteger)index value:(NSString *)value error:(NSString * _Nullable * _Nullable)error;
+- (BOOL)executeRecord:(ZNRuntimeMethodActionRecord *)record argumentIndex:(NSUInteger)index value:(nullable NSString *)value error:(NSString * _Nullable * _Nullable)error;
 - (NSArray<NSString *> *)diagnosticLines;
 @end
 
