@@ -123,11 +123,19 @@
         UIStackView *line=[UIStackView new];
         line.axis=UILayoutConstraintAxisHorizontal;
         line.alignment=UIStackViewAlignmentCenter;
+        line.spacing=8;
+        [line.heightAnchor constraintGreaterThanOrEqualToConstant:36].active=YES;
         UILabel *label=[UILabel new];
         label.text=item.title;
         label.textColor=UIColor.whiteColor;
         label.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        label.numberOfLines=1;
+        label.lineBreakMode=NSLineBreakByTruncatingTail;
+        [label setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
         [line addArrangedSubview:label];
+        UIView *flexibleSpace=[UIView new];
+        [flexibleSpace setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+        [line addArrangedSubview:flexibleSpace];
         if(item.kind==ZNCustomerControlSwitch){
             UISwitch *toggle=[UISwitch new];toggle.on=item.enabled;
             toggle.accessibilityIdentifier=item.identifier;
@@ -154,6 +162,7 @@
             button.accessibilityIdentifier=item.identifier;
             [button addTarget:self action:@selector(executePressed:) forControlEvents:UIControlEventTouchUpInside];
             [line addArrangedSubview:button];
+            [button.widthAnchor constraintEqualToConstant:52].active=YES;
         }
         [self.rows addArrangedSubview:line];
     }
