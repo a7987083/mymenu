@@ -1,4 +1,5 @@
 #import "ZNCustomerAdapter.h"
+#import "ZNCustomerCatalog.h"
 #import "../iosruntimepatchmenu/src/ZNStaticDispatchRuntime.h"
 #import "../iosruntimepatchmenu/src/ZNRuntimeActionRuntime.h"
 
@@ -57,6 +58,17 @@
             [items addObject:item];
         }
         _methodByIdentifier=[methodMap copy];
+        // Native Hook metadata is displayed only; no backend is linked.
+        for (ZNCustomerItem *candidate in [ZNCustomerCatalog discover]) {
+            if (![candidate.identifier hasPrefix:@"action:"]) continue;
+            NSArray<NSString *> *parts=[candidate.identifier componentsSeparatedByString:@":"];
+            if (parts.count!=4 || ![parts[2] isEqualToString:@"2"]) continue;
+            candidate.identifier=[@"preview:" stringByAppendingString:candidate.identifier];
+            candidate.detail=[NSString stringWithFormat:@"%@ · Native Hook（仅显示）",candidate.detail?:@""];
+            candidate.kind=ZNCustomerControlSwitch;
+            candidate.enabled=NO;
+            [items addObject:candidate];
+        }
         return items;
     }
 }
@@ -64,7 +76,7 @@
     ZNStaticPatchRecord *record=nil;
     @synchronized(self){record=_staticByIdentifier[identifier];}
     if(!record){
-        if(error)*error=@"预埋功能不存在或已失效，请重新打开菜单";
+        if(error)*error=[identifier hasPrefix:@"preview:"]?@"Native Hook 仅支持显示，执行器尚未接入":@"预埋功能不存在或已失效，请重新打开菜单";
         return NO;
     }
     return [[ZNStaticDispatchRuntime sharedRuntime] setEnabled:enabled forRecord:record error:error];
