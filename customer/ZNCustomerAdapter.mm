@@ -1,5 +1,6 @@
 #import "ZNCustomerAdapter.h"
 #import "../iosruntimepatchmenu/src/ZNStaticDispatchRuntime.h"
+#import "../iosruntimepatchmenu/src/ZNRuntimeActionRuntime.h"
 
 @implementation ZNCustomerItem
 @end
@@ -8,6 +9,7 @@
 // stay in the audited developer runtime. Never write executable memory here.
 @implementation ZNCustomerAdapter {
     NSDictionary<NSString *, ZNStaticPatchRecord *> *_staticByIdentifier;
+    NSDictionary<NSString *, ZNRuntimeMethodActionRecord *> *_methodByIdentifier;
 }
 + (instancetype)shared {
     static ZNCustomerAdapter *instance;
@@ -38,6 +40,23 @@
             [items addObject:item];
         }
         _staticByIdentifier=[mapping copy];
+        ZNRuntimeActionRuntime *methods=[ZNRuntimeActionRuntime sharedRuntime];
+        [methods refresh];
+        NSMutableDictionary<NSString *,ZNRuntimeMethodActionRecord *> *methodMap=[NSMutableDictionary dictionary];
+        for(ZNRuntimeMethodActionRecord *record in methods.records) {
+            NSString *identifier=[NSString stringWithFormat:@"method:%@:%u",record.sourceImage?:@"",record.actionID];
+            if(methodMap[identifier])continue;
+            methodMap[identifier]=record;
+            ZNCustomerItem *item=[ZNCustomerItem new];
+            item.identifier=identifier;
+            item.title=record.title.length?record.title:(record.methodName?:@"未命名方法");
+            item.detail=record.featureDescription.length?record.featureDescription:(record.group?:@"");
+            item.kind=ZNCustomerControlButton;
+            item.enabled=NO;
+            item.minimum=0;item.maximum=1;item.value=0;
+            [items addObject:item];
+        }
+        _methodByIdentifier=[methodMap copy];
         return items;
     }
 }
@@ -51,8 +70,13 @@
     return [[ZNStaticDispatchRuntime sharedRuntime] setEnabled:enabled forRecord:record error:error];
 }
 - (BOOL)execute:(NSString *)identifier value:(NSNumber *)value error:(NSString **)error {
-    (void)identifier;(void)value;
-    if(error)*error=@"Runtime Method / Native Hook 执行核心尚未接入";
-    return NO;
+    (void)value;
+    ZNRuntimeMethodActionRecord *record=nil;
+    @synchronized(self){record=_methodByIdentifier[identifier];}
+    if(!record){
+        if(error)*error=@"Runtime Method 不存在或已失效，请重新打开菜单";
+        return NO;
+    }
+    return [[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record error:error];
 }
 @end
