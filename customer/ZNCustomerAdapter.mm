@@ -87,8 +87,15 @@
                     item.minimum=minimum.doubleValue;
                     item.maximum=maximum.doubleValue;
                     NSNumber *current=_lastControlValues[identifier]?:initial;
-                    item.value=current.doubleValue;
-                    item.enabled=current.boolValue;
+                    // A method switch is initially OFF; an authored nonzero argument
+                    // is the ON payload, not evidence the method was already called.
+                    if(item.kind==ZNCustomerControlSwitch) {
+                        item.enabled=(_lastControlValues[identifier]?:@NO).boolValue;
+                        item.value=item.enabled?1:0;
+                    } else {
+                        item.value=current.doubleValue;
+                        item.enabled=NO;
+                    }
                     if(visibleArguments.count>1)item.title=[item.title stringByAppendingFormat:@" · 参数%lu",(unsigned long)index+1];
                 }
                 [items addObject:item];
@@ -118,7 +125,17 @@
         ZNRuntimeMethodActionRecord *method=nil;
         @synchronized(self){index=_methodArgumentIndex[identifier];method=_methodByIdentifier[identifier];}
         if(index&&method){
-            BOOL success=[[ZNRuntimeActionRuntime sharedRuntime] executeRecord:method argumentIndex:index.unsignedIntegerValue value:enabled?@"1":@"0" error:error];
+            // ON invokes the authored parameter; OFF invokes zero by design.
+            // Do not confuse the UI toggle boolean with the method argument.
+            NSUInteger argumentIndex=index.unsignedIntegerValue;
+            NSString *onValue=argumentIndex<method.argumentValues.count?
+                method.argumentValues[argumentIndex]:nil;
+            if(enabled && !onValue.length){
+                if(error)*error=@"开关缺少开发端预埋的开启参数";
+                return NO;
+            }
+            NSString *argumentValue=enabled?onValue:@"0";
+            BOOL success=[[ZNRuntimeActionRuntime sharedRuntime] executeRecord:method argumentIndex:argumentIndex value:argumentValue error:error];
             if(success)@synchronized(self){_lastControlValues[identifier]=@(enabled);}
             return success;
         }
