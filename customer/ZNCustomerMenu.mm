@@ -133,6 +133,21 @@
             toggle.accessibilityIdentifier=item.identifier;
             [toggle addTarget:self action:@selector(switchChanged:) forControlEvents:UIControlEventValueChanged];
             [line addArrangedSubview:toggle];
+        } else if(item.kind==ZNCustomerControlSlider) {
+            UISlider *slider=[UISlider new];
+            slider.minimumValue=(float)item.minimum;
+            slider.maximumValue=(float)(item.maximum>item.minimum?item.maximum:item.minimum+1);
+            slider.value=(float)fmax(item.minimum,fmin(item.value,item.maximum));
+            slider.accessibilityIdentifier=item.identifier;
+            [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside];
+            [line addArrangedSubview:slider];
+            [slider.widthAnchor constraintGreaterThanOrEqualToConstant:90].active=YES;
+        } else if(item.kind==ZNCustomerControlNumber) {
+            UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];
+            [button setTitle:[NSString stringWithFormat:@"%.3g",item.value] forState:UIControlStateNormal];
+            button.accessibilityIdentifier=item.identifier;
+            [button addTarget:self action:@selector(numberPressed:) forControlEvents:UIControlEventTouchUpInside];
+            [line addArrangedSubview:button];
         } else {
             UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];
             [button setTitle:@"执行" forState:UIControlStateNormal];
@@ -159,6 +174,38 @@
     NSString *err=nil;
     if(![[ZNCustomerAdapter shared]execute:sender.accessibilityIdentifier?:@"" value:nil error:&err])
         [self error:err?:@"执行失败"];
+}
+- (void)sliderChanged:(UISlider *)sender {
+    NSString *err=nil;
+    if(![[ZNCustomerAdapter shared]execute:sender.accessibilityIdentifier?:@"" value:@(sender.value) error:&err]){
+        [self error:err?:@"滑条执行失败"];
+        [self reload];
+    }
+}
+- (void)numberPressed:(UIButton *)sender {
+    NSString *identifier=sender.accessibilityIdentifier?:@"";
+    UIAlertController *dialog=[UIAlertController alertControllerWithTitle:@"输入数值" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    [dialog addTextFieldWithConfigurationHandler:^(UITextField *field){
+        field.keyboardType=UIKeyboardTypeNumbersAndPunctuation;
+        field.placeholder=@"数值";
+    }];
+    __weak ZNCustomerController *weakSelf=self;
+    [dialog addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [dialog addAction:[UIAlertAction actionWithTitle:@"执行" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        (void)action;
+        NSString *raw=dialog.textFields.firstObject.text?:@"";
+        NSScanner *scanner=[NSScanner scannerWithString:raw];
+        double number=0;
+        if(![scanner scanDouble:&number] || !scanner.isAtEnd || !std::isfinite(number)){
+            [weakSelf error:@"请输入有效的有限数值"];
+            return;
+        }
+        NSString *err=nil;
+        if(![[ZNCustomerAdapter shared]execute:identifier value:@(number) error:&err])
+            [weakSelf error:err?:@"数值执行失败"];
+        else [weakSelf reload];
+    }]];
+    [self presentViewController:dialog animated:YES completion:nil];
 }
 - (void)closePressed { if(self.onClose)self.onClose(); }
 - (void)drag:(UIPanGestureRecognizer *)gesture {
