@@ -14,6 +14,7 @@
 
 @interface ZNCustomerController : UIViewController
 @property(nonatomic,strong) UIStackView *rows;
+@property(nonatomic,strong) NSMutableDictionary<NSString *, NSString *> *numberDrafts;
 @property(nonatomic,copy) void (^onClose)(void);
 @property(nonatomic,copy) void (^onMove)(void);
 @end
@@ -27,6 +28,7 @@
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    self.numberDrafts=[NSMutableDictionary dictionary];
     CAGradientLayer *stroke=[CAGradientLayer layer];
     stroke.colors=@[(id)[UIColor colorWithRed:.92 green:.20 blue:1 alpha:1].CGColor,
                     (id)[UIColor colorWithRed:.20 green:.78 blue:1 alpha:1].CGColor,
@@ -151,11 +153,39 @@
             [line addArrangedSubview:slider];
             [slider.widthAnchor constraintGreaterThanOrEqualToConstant:90].active=YES;
         } else if(item.kind==ZNCustomerControlNumber) {
-            UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];
-            [button setTitle:[NSString stringWithFormat:@"%.3g",item.value] forState:UIControlStateNormal];
-            button.accessibilityIdentifier=item.identifier;
-            [button addTarget:self action:@selector(numberPressed:) forControlEvents:UIControlEventTouchUpInside];
-            [line addArrangedSubview:button];
+            // Inline draft value: do not invoke the method until the user taps "执行".
+            NSString *identifier=item.identifier?:@"";
+            if(!self.numberDrafts[identifier])
+                self.numberDrafts[identifier]=[NSString stringWithFormat:@"%.15g",item.value];
+            UIStackView *inputColumn=[UIStackView new];
+            inputColumn.axis=UILayoutConstraintAxisVertical;
+            inputColumn.spacing=2;
+            UITextField *field=[UITextField new];
+            field.accessibilityIdentifier=identifier;
+            field.text=self.numberDrafts[identifier];
+            field.placeholder=@"数量";
+            field.textColor=UIColor.whiteColor;
+            field.tintColor=[UIColor colorWithRed:.20 green:.78 blue:1 alpha:1];
+            field.font=[UIFont systemFontOfSize:13];
+            field.textAlignment=NSTextAlignmentCenter;
+            field.keyboardType=UIKeyboardTypeNumbersAndPunctuation;
+            field.autocorrectionType=UITextAutocorrectionTypeNo;
+            field.returnKeyType=UIReturnKeyDone;
+            [field addTarget:self action:@selector(numberTextChanged:) forControlEvents:UIControlEventEditingChanged];
+            [field addTarget:self action:@selector(numberEditingDone:) forControlEvents:UIControlEventEditingDidEndOnExit];
+            [inputColumn addArrangedSubview:field];
+            UIView *underline=[UIView new];
+            underline.backgroundColor=[UIColor colorWithRed:.35 green:.66 blue:1 alpha:.9];
+            [underline.heightAnchor constraintEqualToConstant:1].active=YES;
+            [inputColumn addArrangedSubview:underline];
+            [inputColumn.widthAnchor constraintEqualToConstant:70].active=YES;
+            [line addArrangedSubview:inputColumn];
+            UIButton *apply=[UIButton buttonWithType:UIButtonTypeSystem];
+            [apply setTitle:@"执行" forState:UIControlStateNormal];
+            apply.accessibilityIdentifier=identifier;
+            [apply addTarget:self action:@selector(numberExecutePressed:) forControlEvents:UIControlEventTouchUpInside];
+            [apply.widthAnchor constraintEqualToConstant:44].active=YES;
+            [line addArrangedSubview:apply];
         } else {
             UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];
             [button setTitle:@"触发" forState:UIControlStateNormal];
@@ -191,30 +221,29 @@
         [self reload];
     }
 }
-- (void)numberPressed:(UIButton *)sender {
+- (void)numberTextChanged:(UITextField *)field {
+    if(field.accessibilityIdentifier.length)
+        self.numberDrafts[field.accessibilityIdentifier]=field.text?:@"";
+}
+- (void)numberEditingDone:(UITextField *)field {
+    [field resignFirstResponder];
+}
+- (void)numberExecutePressed:(UIButton *)sender {
     NSString *identifier=sender.accessibilityIdentifier?:@"";
-    UIAlertController *dialog=[UIAlertController alertControllerWithTitle:@"设置数值" message:nil preferredStyle:UIAlertControllerStyleAlert];
-    [dialog addTextFieldWithConfigurationHandler:^(UITextField *field){
-        field.keyboardType=UIKeyboardTypeNumbersAndPunctuation;
-        field.placeholder=@"数值";
-    }];
-    __weak ZNCustomerController *weakSelf=self;
-    [dialog addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [dialog addAction:[UIAlertAction actionWithTitle:@"执行" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
-        (void)action;
-        NSString *raw=dialog.textFields.firstObject.text?:@"";
-        NSScanner *scanner=[NSScanner scannerWithString:raw];
-        double number=0;
-        if(![scanner scanDouble:&number] || !scanner.isAtEnd || !std::isfinite(number)){
-            [weakSelf error:@"请输入有效的有限数值"];
-            return;
-        }
-        NSString *err=nil;
-        if(![[ZNCustomerAdapter shared]execute:identifier value:@(number) error:&err])
-            [weakSelf error:err?:@"数值执行失败"];
-        else [weakSelf reload];
-    }]];
-    [self presentViewController:dialog animated:YES completion:nil];
+    NSString *raw=[self.numberDrafts[identifier]?:@"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSScanner *scanner=[NSScanner scannerWithString:raw];
+    double number=0;
+    if(!raw.length || ![scanner scanDouble:&number] || !scanner.isAtEnd || !std::isfinite(number)){
+        [self error:@"请输入有效的有限数值"];
+        return;
+    }
+    NSString *err=nil;
+    if(![[ZNCustomerAdapter shared] execute:identifier value:@(number) error:&err]){
+        [self error:err?:@"数值执行失败"];
+        return;
+    }
+    [self.view endEditing:YES];
+    [self reload];
 }
 - (void)closePressed { if(self.onClose)self.onClose(); }
 - (void)drag:(UIPanGestureRecognizer *)gesture {
