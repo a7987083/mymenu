@@ -44,7 +44,7 @@
         [methods refresh];
         NSMutableDictionary<NSString *,ZNRuntimeMethodActionRecord *> *methodMap=[NSMutableDictionary dictionary];
         for(ZNRuntimeMethodActionRecord *record in methods.records) {
-            NSString *identifier=[NSString stringWithFormat:@"method:%@:%u",record.sourceImage?:@"",record.actionID];
+            NSString *identifier=[NSString stringWithFormat:@"method:%@:%u:%@",record.sourceImage?:@"",record.actionID,record.canonicalIdentity?:@""];
             if(methodMap[identifier])continue;
             methodMap[identifier]=record;
             ZNCustomerItem *item=[ZNCustomerItem new];
