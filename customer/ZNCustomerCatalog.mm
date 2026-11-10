@@ -39,6 +39,7 @@ static ZNCustomerItem *ZNItem(NSString *key, NSString *title, NSString *detail, 
             if(lc->cmd==LC_SEGMENT_64 && lc->cmdsize>=sizeof(struct segment_command_64)){
                 const struct segment_command_64 *seg=(const struct segment_command_64 *)cmd;
                 if(strncmp(seg->segname,"__ZNDATA",16)==0 &&
+                   seg->nsects <= (lc->cmdsize-sizeof(*seg))/sizeof(struct section_64) &&
                    lc->cmdsize>=sizeof(*seg)+(uint64_t)seg->nsects*sizeof(struct section_64)){
                     const struct section_64 *sections=(const struct section_64 *)(seg+1);
                     for(uint32_t k=0;k<seg->nsects;k++){
@@ -71,6 +72,7 @@ static ZNCustomerItem *ZNItem(NSString *key, NSString *title, NSString *detail, 
                            a->entrySize!=sizeof(ZNRuntimeMethodCallEntry) || a->count>ZN_RUNTIME_ACTION_MAX_ENTRIES ||
                            a->totalSize>sect->size-actionOffset || a->totalSize<sizeof(*a) ||
                            a->count>(a->totalSize-sizeof(*a))/sizeof(ZNRuntimeMethodCallEntry) ||
+                           a->stringPoolOffset<a->count*sizeof(ZNRuntimeMethodCallEntry)+sizeof(*a) ||
                            a->stringPoolOffset>a->totalSize || a->stringPoolSize>a->totalSize-a->stringPoolOffset)continue;
                         const ZNRuntimeMethodCallEntry *actions=(const ZNRuntimeMethodCallEntry *)(a+1);
                         for(uint32_t n=0;n<a->count;n++){
