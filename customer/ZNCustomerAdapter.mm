@@ -1,4 +1,5 @@
 #import "ZNCustomerAdapter.h"
+#import "ZNCustomerCatalog.h"
 @implementation ZNCustomerItem
 @end
 
@@ -11,15 +12,15 @@
     dispatch_once(&once, ^{ instance = [ZNCustomerAdapter new]; });
     return instance;
 }
-- (NSArray<ZNCustomerItem *> *)snapshot { return @[]; }
+- (NSArray<ZNCustomerItem *> *)snapshot { return [ZNCustomerCatalog discover]; }
 - (BOOL)setEnabled:(BOOL)enabled identifier:(NSString *)identifier error:(NSString **)error {
     (void)enabled; (void)identifier;
-    if(error) *error = @"Customer 执行适配器尚未接入，禁止修改目标进程";
+    if(error) *error = @"已识别预埋功能，但执行器尚未接入；拒绝写入目标进程";
     return NO;
 }
 - (BOOL)execute:(NSString *)identifier value:(NSNumber *)value error:(NSString **)error {
     (void)identifier; (void)value;
-    if(error) *error = @"Customer 执行适配器尚未接入，禁止调用目标方法";
+    if(error) *error = @"已识别预埋功能，但执行器尚未接入；拒绝执行目标方法";
     return NO;
 }
 @end
