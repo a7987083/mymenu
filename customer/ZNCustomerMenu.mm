@@ -158,7 +158,7 @@
             [line addArrangedSubview:button];
         } else {
             UIButton *button=[UIButton buttonWithType:UIButtonTypeSystem];
-            [button setTitle:@"执行" forState:UIControlStateNormal];
+            [button setTitle:@"触发" forState:UIControlStateNormal];
             button.accessibilityIdentifier=item.identifier;
             [button addTarget:self action:@selector(executePressed:) forControlEvents:UIControlEventTouchUpInside];
             [line addArrangedSubview:button];
@@ -193,7 +193,7 @@
 }
 - (void)numberPressed:(UIButton *)sender {
     NSString *identifier=sender.accessibilityIdentifier?:@"";
-    UIAlertController *dialog=[UIAlertController alertControllerWithTitle:@"输入数值" message:nil preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *dialog=[UIAlertController alertControllerWithTitle:@"设置数值" message:nil preferredStyle:UIAlertControllerStyleAlert];
     [dialog addTextFieldWithConfigurationHandler:^(UITextField *field){
         field.keyboardType=UIKeyboardTypeNumbersAndPunctuation;
         field.placeholder=@"数值";
