@@ -1,5 +1,7 @@
 #import "ZNCustomerAdapter.h"
 #import "ZNCustomerCatalog.h"
+#import "../iosruntimepatchmenu/src/ZNRuntimeActionModel.h"
+#include <cmath>
 #import "../iosruntimepatchmenu/src/ZNStaticDispatchRuntime.h"
 #import "../iosruntimepatchmenu/src/ZNRuntimeActionRuntime.h"
 
@@ -11,6 +13,8 @@
 @implementation ZNCustomerAdapter {
     NSDictionary<NSString *, ZNStaticPatchRecord *> *_staticByIdentifier;
     NSDictionary<NSString *, ZNRuntimeMethodActionRecord *> *_methodByIdentifier;
+    NSDictionary<NSString *, NSNumber *> *_methodArgumentIndex;
+    NSMutableDictionary<NSString *, NSNumber *> *_lastControlValues;
 }
 + (instancetype)shared {
     static ZNCustomerAdapter *instance;
@@ -44,20 +48,54 @@
         ZNRuntimeActionRuntime *methods=[ZNRuntimeActionRuntime sharedRuntime];
         [methods refresh];
         NSMutableDictionary<NSString *,ZNRuntimeMethodActionRecord *> *methodMap=[NSMutableDictionary dictionary];
+        NSMutableDictionary<NSString *,NSNumber *> *argumentMap=[NSMutableDictionary dictionary];
+        if(!_lastControlValues)_lastControlValues=[NSMutableDictionary dictionary];
         for(ZNRuntimeMethodActionRecord *record in methods.records) {
-            NSString *identifier=[NSString stringWithFormat:@"method:%@:%u:%@",record.sourceImage?:@"",record.actionID,record.canonicalIdentity?:@""];
-            if(methodMap[identifier])continue;
-            methodMap[identifier]=record;
-            ZNCustomerItem *item=[ZNCustomerItem new];
-            item.identifier=identifier;
-            item.title=record.title.length?record.title:(record.methodName?:@"未命名方法");
-            item.detail=record.featureDescription.length?record.featureDescription:(record.group?:@"");
-            item.kind=ZNCustomerControlButton;
-            item.enabled=NO;
-            item.minimum=0;item.maximum=1;item.value=0;
-            [items addObject:item];
+            NSString *base=[NSString stringWithFormat:@"method:%@:%u:%@",record.sourceImage?:@"",record.actionID,record.canonicalIdentity?:@""];
+            NSMutableArray<NSNumber *> *visibleArguments=[NSMutableArray array];
+            if(record.argumentControlConfigs.count==record.argumentCount) {
+                for(NSUInteger index=0;index<record.argumentCount;index++){
+                    NSDictionary *config=record.argumentControlConfigs[index];
+                    if(![config isKindOfClass:NSDictionary.class]||![config[@"enabled"] boolValue])continue;
+                    NSString *type=[config[@"type"] isKindOfClass:NSString.class]?config[@"type"]:@"fixed";
+                    if(![type isEqualToString:@"fixed"])[visibleArguments addObject:@(index)];
+                }
+            }
+            // No explicitly enabled parameter controls: keep one trigger button.
+            if(!visibleArguments.count)[visibleArguments addObject:@(NSNotFound)];
+            for(NSNumber *indexNumber in visibleArguments) {
+                NSUInteger index=indexNumber.unsignedIntegerValue;
+                NSString *identifier=index==NSNotFound?base:[base stringByAppendingFormat:@":arg:%lu",(unsigned long)index];
+                if(methodMap[identifier])continue;
+                methodMap[identifier]=record;
+                ZNCustomerItem *item=[ZNCustomerItem new];
+                item.identifier=identifier;
+                item.title=record.title.length?record.title:(record.methodName?:@"未命名方法");
+                item.detail=record.featureDescription.length?record.featureDescription:(record.group?:@"");
+                item.kind=ZNCustomerControlButton;
+                item.minimum=0;item.maximum=1;item.value=0;item.enabled=NO;
+                if(index!=NSNotFound) {
+                    argumentMap[identifier]=@(index);
+                    NSDictionary *config=record.argumentControlConfigs[index];
+                    NSString *type=[config[@"type"] isKindOfClass:NSString.class]?config[@"type"]:@"";
+                    if([type isEqualToString:@"switch"])item.kind=ZNCustomerControlSwitch;
+                    else if([type isEqualToString:@"slider"])item.kind=ZNCustomerControlSlider;
+                    else if([type isEqualToString:@"number"])item.kind=ZNCustomerControlNumber;
+                    NSNumber *minimum=[config[@"min"] isKindOfClass:NSNumber.class]?config[@"min"]:@0;
+                    NSNumber *maximum=[config[@"max"] isKindOfClass:NSNumber.class]?config[@"max"]:@1;
+                    NSNumber *initial=[config[@"default"] isKindOfClass:NSNumber.class]?config[@"default"]:@0;
+                    item.minimum=minimum.doubleValue;
+                    item.maximum=maximum.doubleValue;
+                    NSNumber *current=_lastControlValues[identifier]?:initial;
+                    item.value=current.doubleValue;
+                    item.enabled=current.boolValue;
+                    if(visibleArguments.count>1)item.title=[item.title stringByAppendingFormat:@" · 参数%lu",(unsigned long)index+1];
+                }
+                [items addObject:item];
+            }
         }
         _methodByIdentifier=[methodMap copy];
+        _methodArgumentIndex=[argumentMap copy];
         // Native Hook metadata is displayed only; no backend is linked.
         for (ZNCustomerItem *candidate in [ZNCustomerCatalog discover]) {
             if (![candidate.identifier hasPrefix:@"action:"]) continue;
@@ -76,19 +114,45 @@
     ZNStaticPatchRecord *record=nil;
     @synchronized(self){record=_staticByIdentifier[identifier];}
     if(!record){
+        NSNumber *index=nil;
+        ZNRuntimeMethodActionRecord *method=nil;
+        @synchronized(self){index=_methodArgumentIndex[identifier];method=_methodByIdentifier[identifier];}
+        if(index&&method){
+            BOOL success=[[ZNRuntimeActionRuntime sharedRuntime] executeRecord:method argumentIndex:index.unsignedIntegerValue value:enabled?@"1":@"0" error:error];
+            if(success)@synchronized(self){_lastControlValues[identifier]=@(enabled);}
+            return success;
+        }
         if(error)*error=[identifier hasPrefix:@"preview:"]?@"Native Hook 仅支持显示，执行器尚未接入":@"预埋功能不存在或已失效，请重新打开菜单";
         return NO;
     }
     return [[ZNStaticDispatchRuntime sharedRuntime] setEnabled:enabled forRecord:record error:error];
 }
 - (BOOL)execute:(NSString *)identifier value:(NSNumber *)value error:(NSString **)error {
-    (void)value;
     ZNRuntimeMethodActionRecord *record=nil;
-    @synchronized(self){record=_methodByIdentifier[identifier];}
+    NSNumber *index=nil;
+    @synchronized(self){record=_methodByIdentifier[identifier];index=_methodArgumentIndex[identifier];}
     if(!record){
         if(error)*error=@"Runtime Method 不存在或已失效，请重新打开菜单";
         return NO;
     }
-    return [[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record error:error];
+    if(!index)return [[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record error:error];
+    if(!value){
+        // Button controls retain their authored argument value.
+        return [[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record error:error];
+    }
+    if(!std::isfinite(value.doubleValue)){
+        if(error)*error=@"数值必须是有限数";
+        return NO;
+    }
+    NSDictionary *config=record.argumentControlConfigs[index.unsignedIntegerValue];
+    double min=[config[@"min"] doubleValue],max=[config[@"max"] doubleValue];
+    if(value.doubleValue<min||value.doubleValue>max){
+        if(error)*error=[NSString stringWithFormat:@"数值超出范围：%.6g ~ %.6g",min,max];
+        return NO;
+    }
+    NSString *valueText=[value stringValue];
+    BOOL success=[[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record argumentIndex:index.unsignedIntegerValue value:valueText error:error];
+    if(success)@synchronized(self){_lastControlValues[identifier]=value;}
+    return success;
 }
 @end
