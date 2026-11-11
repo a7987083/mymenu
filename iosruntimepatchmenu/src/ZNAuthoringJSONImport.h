@@ -5,6 +5,8 @@ NS_ASSUME_NONNULL_BEGIN
 // Strict schema: format=zonoe-authoring, schemaVersion=1,
 // runtimeMethods/nativeHooks arrays. Legacy Patch JSON goes to the old importer.
 + (BOOL)isAuthoringConfiguration:(id)root;
+// Portable authoring records only: no prepared RVA, UUID, or trampoline.
++ (nullable NSData *)exportDataWithError:(NSString * _Nullable * _Nullable)error;
 + (BOOL)importData:(NSData *)data status:(NSString * _Nullable * _Nullable)status error:(NSString * _Nullable * _Nullable)error;
 @end
 NS_ASSUME_NONNULL_END
