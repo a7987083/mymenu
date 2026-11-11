@@ -3270,7 +3270,7 @@ static void ZN65StoreNumberText(NSDictionary *feature, NSString *text) {
             NSString *fallback=ZNValueTypeIsInteger(valueType)||valueType==ZNValueTypeAuto?[NSString stringWithFormat:@"%.0f",stored]:[NSString stringWithFormat:@"%.6g",stored];
             field.text=ZN65StoredText(feature,fallback);
             field.textAlignment=NSTextAlignmentCenter;
-            field.keyboardType=[p[@"byRef"] boolValue]?UIKeyboardTypeDefault:UIKeyboardTypeNumbersAndPunctuation;
+            field.keyboardType=UIKeyboardTypeNumbersAndPunctuation;
             field.returnKeyType=UIReturnKeyDone;
             field.textColor=self.theme.primaryTextColor;
             field.backgroundColor=[self.theme.controlColor colorWithAlphaComponent:.82];
@@ -14139,7 +14139,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
             NSString *storeKey=ZNM613ArgumentStoreKey(candidate,arg);
             field.text=[argStore[storeKey] isKindOfClass:NSString.class]?argStore[storeKey]:@"";
             field.placeholder=type;
-            field.keyboardType=UIKeyboardTypeNumbersAndPunctuation;
+            field.keyboardType=[p[@"byRef"] boolValue]?UIKeyboardTypeDefault:UIKeyboardTypeNumbersAndPunctuation;
             field.returnKeyType=UIReturnKeyDone;
             objc_setAssociatedObject(field,kZNM613ArgCandidateKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             objc_setAssociatedObject(field,kZNM613ArgIndexKey,@(arg),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
