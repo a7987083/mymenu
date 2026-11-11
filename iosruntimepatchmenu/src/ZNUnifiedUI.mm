@@ -13523,6 +13523,15 @@ static NSMutableDictionary<NSString *,NSString *> *ZNM613ResultStore(ZNRuntimeMe
 static void ZNM613SetCandidateStatus(ZNRuntimeMenuControllerV040 *controller,
                                      NSDictionary *candidate,NSString *status) {
     if(!controller||![candidate isKindOfClass:NSDictionary.class])return;
+    // Receiver-capture completion may arrive off the main thread.
+    if(!NSThread.isMainThread){
+        NSDictionary *captured=[candidate copy];
+        NSString *message=[status copy];
+        dispatch_async(dispatch_get_main_queue(),^{
+            ZNM613SetCandidateStatus(controller,captured,message);
+        });
+        return;
+    }
     NSString *identity=ZNM613CandidateIdentity(candidate);
     if(!identity.length)return;
     NSString *message=[status isKindOfClass:NSString.class]&&status.length?status:@"测试未返回状态";
