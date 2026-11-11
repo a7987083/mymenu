@@ -185,7 +185,14 @@ static void *ZNM47InstanceForAction(ZNRuntimeMethodAction *action, NSString **di
 @implementation ZNIL2CPPInvokeEngine (ZNM47MultiArgInvoke)
 
 - (NSDictionary<NSString *,id> *)znm47_executeAction:(ZNRuntimeMethodAction *)action error:(NSString **)error {
-    if (!action || action.argumentCount < 2) return [self znm47_executeAction:action error:error];
+    if (!action || action.argumentCount == 0) return [self znm47_executeAction:action error:error];
+    if (action.argumentCount == 1) {
+        // Keep the existing /1 path unless the full signature explicitly has ByRef.
+        BOOL typedRef=action.signatureAvailable && action.parameterTypeNames.count==1 &&
+            [[action.parameterTypeNames.firstObject stringByTrimmingCharactersInSet:
+               NSCharacterSet.whitespaceAndNewlineCharacterSet] hasSuffix:@"&"];
+        if (!typedRef) return [self znm47_executeAction:action error:error];
+    }
     if (action.argumentCount > ZN_RUNTIME_ACTION_MAX_ARGUMENTS) {
         if (error) *error = [NSString stringWithFormat:@"FAILED_UNSUPPORTED_ARGUMENT：M4.7 最多 %u 个参数", ZN_RUNTIME_ACTION_MAX_ARGUMENTS];
         return nil;

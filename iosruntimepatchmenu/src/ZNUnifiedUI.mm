@@ -12137,7 +12137,8 @@ static NSUInteger ZNM54StructCount(NSString *type) {
 }
 
 static NSString *ZNM54UnsupportedReason(NSDictionary *param) {
-    if ([param[@"byRef"] boolValue]) return @"ref/out 暂不支持";
+    // Runtime Invoke performs strict element-type validation at execution.
+    if ([param[@"byRef"] boolValue]) return nil;
     if ([param[@"pointer"] boolValue]) return @"pointer 暂不支持";
     NSString *type = [param[@"name"] isKindOfClass:NSString.class] ? param[@"name"] : @"?";
     if (ZNM54IsString(type)) return nil;
@@ -13567,6 +13568,7 @@ static NSArray<NSString *> *ZNM613ArgumentValues(ZNRuntimeMenuControllerV040 *se
 }
 
 static NSString *ZNM613ParamAutoLabel(NSDictionary *param) {
+    if([param[@"byRef"] boolValue])return @"ByRef · value / out / null / hex:（按类型校验）";
     NSString *type=[param[@"name"] isKindOfClass:NSString.class]?param[@"name"]:@"?";
     NSString *codec=ZNComplexStructCodecKeyForManagedType(type);
     if([codec isEqualToString:ZNComplexStructCodecObscuredInt])return @"ObscuredInt Codec · ARM64 indirect struct";
@@ -14250,14 +14252,35 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         return;
     }
     NSString *error=nil;
-    NSDictionary *result=[[ZNIL2CPPInvokeEngine sharedEngine]
-        executeAssembly:([candidate[@"assembly"] isKindOfClass:NSString.class]?candidate[@"assembly"]:@"Assembly-CSharp.dll")
-              namespace:([candidate[@"namespace"] isKindOfClass:NSString.class]?candidate[@"namespace"]:@"")
-              className:([candidate[@"class"] isKindOfClass:NSString.class]?candidate[@"class"]:@"")
-                 method:([candidate[@"method"] isKindOfClass:NSString.class]?candidate[@"method"]:@"")
-          argumentCount:argc
-         argumentValues:values
-                  error:&error];
+    NSDictionary *result=nil;
+    NSDictionary *analysis=ZNM613AnalyzeCandidate(candidate);
+    NSArray<NSDictionary *> *parameters=[analysis[@"params"] isKindOfClass:NSArray.class]?analysis[@"params"]:@[];
+    BOOL needsByRef=NO;
+    for(NSDictionary *p in parameters)if([p[@"byRef"] boolValue]){needsByRef=YES;break;}
+    if(argc>=2 || needsByRef) {
+        // Use the exact action executor also used by saved Runtime methods.
+        ZNRuntimeMethodAction *action=[ZNRuntimeMethodAction new];
+        action.assembly=ZNM52XString(candidate[@"assembly"]).length?ZNM52XString(candidate[@"assembly"]):@"Assembly-CSharp.dll";
+        action.namespaceName=ZNM52XString(candidate[@"namespace"]);
+        action.className=ZNM52XString(candidate[@"class"]);
+        action.methodName=ZNM52XString(candidate[@"method"]);
+        action.argumentCount=argc;
+        action.argumentValues=values;
+        NSMutableArray<NSString *> *names=[NSMutableArray arrayWithCapacity:argc];
+        for(NSDictionary *p in parameters)[names addObject:ZNM52XString(p[@"name"])];
+        action.parameterTypeNames=names;
+        action.signatureAvailable=(names.count==argc);
+        result=[[ZNIL2CPPInvokeEngine sharedEngine] executeAction:action error:&error];
+    } else {
+        result=[[ZNIL2CPPInvokeEngine sharedEngine]
+            executeAssembly:([candidate[@"assembly"] isKindOfClass:NSString.class]?candidate[@"assembly"]:@"Assembly-CSharp.dll")
+                  namespace:([candidate[@"namespace"] isKindOfClass:NSString.class]?candidate[@"namespace"]:@"")
+                  className:([candidate[@"class"] isKindOfClass:NSString.class]?candidate[@"class"]:@"")
+                     method:([candidate[@"method"] isKindOfClass:NSString.class]?candidate[@"method"]:@"")
+              argumentCount:argc
+             argumentValues:values
+                      error:&error];
+    }
     ZNM613SetCandidateStatus(self,candidate,result
         ? [NSString stringWithFormat:@"Runtime Invoke SUCCESS：%@ args=%@",ZNM52XString(candidate[@"method"]),values]
         : (error?:@"Runtime Invoke FAILED"));
