@@ -104,13 +104,10 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
         if(error)*error=@"IL2CPP 尚未就绪，无法自动验证目标方法；未导入";
         return NO;
     }
+    // Full method signatures distinguish overloads of the same arity.
     NSMutableSet<NSString *> *existingMethods=[NSMutableSet set];
     for(ZNRuntimeMethodAction *a in [store actionsSnapshot])
-        [existingMethods addObject:[NSString stringWithFormat:@"%@|%@|%@|%@|%lu",a.assembly?:@"",a.namespaceName?:@"",a.className?:@"",a.methodName?:@"",(unsigned long)a.argumentCount]];
-    NSMutableSet<NSString *> *existingHooks=[NSMutableSet set];
-    for(ZNNativeHookAction *a in [hookStore actionsSnapshot])
-        [existingHooks addObject:[NSString stringWithFormat:@"%@|%u|%lu|%lu",a.canonicalIdentity?:@"",
-            (unsigned)a.templateKind,(unsigned long)a.argumentIndex,(unsigned long)a.fieldArgumentIndex]];
+        [existingMethods addObject:a.canonicalIdentity?:@""];
 
     // Preflight every record BEFORE adding anything. No silent partial import.
     NSMutableSet<NSString *> *pendingMethods=[NSMutableSet set],*pendingHooks=[NSMutableSet set];
@@ -161,11 +158,15 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
             }
         }
         NSString *key=[NSString stringWithFormat:@"%@|%@|%@|%@|%@",assembly,ns,cls,method,argc];
-        if([existingMethods containsObject:key] || [pendingMethods containsObject:key]){
+        NSArray *claimedTypes=d[@"parameterTypeNames"];
+        NSString *identity=([d[@"signatureAvailable"] boolValue]&&
+            [claimedTypes isKindOfClass:NSArray.class]&&claimedTypes.count==(NSUInteger)argc.integerValue)?
+            ZNIL2CPPFullMethodIdentity(assembly,ns,cls,method,claimedTypes):key;
+        if([existingMethods containsObject:identity] || [pendingMethods containsObject:identity]){
             if(error)*error=[NSString stringWithFormat:@"Runtime 方法已存在或 JSON 重复：%@",key];
             return NO;
         }
-        [pendingMethods addObject:key];
+        [pendingMethods addObject:identity];
         NSArray *types=d[@"parameterTypeNames"];
         if(![d[@"signatureAvailable"] boolValue]||![types isKindOfClass:NSArray.class]||
            types.count!=(NSUInteger)argc.integerValue){
