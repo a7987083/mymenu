@@ -3677,25 +3677,34 @@ static NSMutableSet<NSString *> *ZN50BExpandedKeys(ZNRuntimeMenuControllerV040 *
     ZN50BNormalizeImportedGroups(workspace);
     BOOL locked = workspace.hasAnyApplied || workspace.isBuilding;
 
-    // Target + JSON import. JSON is authoring-time only; it is not a runtime dependency.
-    UIView *targetCard = [self cardAtY:y height:56 width:width compact:NO];
-    UILabel *binaryLabel = [self label:@"Target" size:11.2 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
-    binaryLabel.frame = CGRectMake(13, 11, 50, 32);
-    [targetCard addSubview:binaryLabel];
-    CGFloat importW = 78.0;
-    UITextField *target = [self zn44_field:CGRectMake(65, 11, targetCard.bounds.size.width - 65 - importW - 18, 32)
-                                        text:workspace.defaultTarget
-                                 placeholder:@"自动 / UnityFramework"
-                                         tag:440000
-                                     enabled:!locked];
+    // Phase 1: compact target picker and backup UI. The existing import
+    // remains Patch JSON-only; unified Runtime/Native configuration comes later.
+    UIView *targetCard = [self cardAtY:y height:52 width:width compact:NO];
+    CGFloat cardW=CGRectGetWidth(targetCard.bounds);
+    CGFloat margin=9.0, gap=6.0, actionW=57.0;
+    CGFloat pickerW=MAX(48.0,cardW-2*margin-2*actionW-2*gap);
+    UITextField *target=[self zn44_field:CGRectMake(margin,9,pickerW,32)
+                                      text:workspace.defaultTarget
+                               placeholder:@"选择二进制"
+                                       tag:440000
+                                   enabled:!locked];
     [targetCard addSubview:target];
-    UIButton *import = [self zn40_button:(workspace.showJSONFiles ? @"收起 JSON" : @"导入 JSON")
-                                selector:@selector(zn44_importJSON:)
-                                   frame:CGRectMake(targetCard.bounds.size.width - importW - 9, 11, importW, 32)];
-    import.enabled = !locked;
+    UIButton *import=[self zn40_button:(workspace.showJSONFiles ? @"收起" : @"导入")
+                              selector:@selector(zn44_importJSON:)
+                                 frame:CGRectMake(margin+pickerW+gap,9,actionW,32)];
+    import.enabled=!locked;
+    import.accessibilityHint=@"当前导入功能仅支持原有 Patch JSON";
     [targetCard addSubview:import];
+    // Display the planned export entry, but do not attach a no-op action.
+    UIButton *export=[self zn40_button:@"导出"
+                              selector:NULL
+                                 frame:CGRectMake(margin+pickerW+gap+actionW+gap,9,actionW,32)];
+    export.enabled=NO;
+    export.alpha=0.45;
+    export.accessibilityHint=@"Runtime Method 和 Native Hook 配置导出将在下一阶段接入";
+    [targetCard addSubview:export];
     [self.contentView addSubview:targetCard];
-    y += 64;
+    y += 60;
 
     if (workspace.showJSONFiles) {
         NSUInteger shown = workspace.jsonFiles.count;
