@@ -12065,6 +12065,10 @@ static const NSUInteger kZNM54HistoryMax = 50;
 static const NSInteger kZNM54QueryTag = 954001;
 static const NSInteger kZNM54LimitTag = 954002;
 static const NSInteger kZNM65LiveHookStatusTag = 965501;
+static const void *kZNM613CardCandidateKey=&kZNM613CardCandidateKey;
+static const void *kZNM613CardResultLabelKey=&kZNM613CardResultLabelKey;
+static const void *kZNM613ResultStoreKey=&kZNM613ResultStoreKey;
+
 static const void *kZNM65LiveHookTimerKey = &kZNM65LiveHookTimerKey;
 static const void *kZNM54CandidateKey = &kZNM54CandidateKey;
 static const void *kZNM54StoreKey = &kZNM54StoreKey;
@@ -12298,10 +12302,26 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
 }
 
 - (void)znm65_refreshLiveHookStatus {
-    UILabel *label=(UILabel *)[self.contentView viewWithTag:kZNM65LiveHookStatusTag];
-    if(![label isKindOfClass:UILabel.class])return;
-    NSString *live=[[ZNNativeHookRuntime sharedRuntime] liveTestStatus];
-    if(live.length)label.text=live;
+    // Only touch the card that owns the installed Hook; unrelated results stay intact.
+    for(UIView *card in self.contentView.subviews){
+        NSDictionary *candidate=objc_getAssociatedObject(card,kZNM613CardCandidateKey);
+        if(!candidate)continue;
+        NSString *diag=[[ZNNativeHookRuntime sharedRuntime] diagnosticsForCandidate:candidate];
+        if(![diag containsString:@"已安装"])continue;
+        for(UILabel *label in card.subviews){
+            if(![label isKindOfClass:UILabel.class]||![label.text hasPrefix:@"状态  Native Hook："])continue;
+            NSString *hits=@"";
+            for(NSString *line in [diag componentsSeparatedByString:@"\\n"]){
+                if([line hasPrefix:@"Hits："]){hits=line;break;}
+            }
+            NSString *directLine=@"Direct Call：—";
+            NSRange r=[label.text rangeOfString:@"Direct Call："];
+            if(r.location!=NSNotFound)directLine=[label.text substringFromIndex:r.location];
+            label.text=[NSString stringWithFormat:@"状态  Native Hook：已安装%@%@\\n%@",
+                        hits.length?@" · ":@"",hits,directLine];
+            break;
+        }
+    }
 }
 
 - (void)znm65_startLiveHookStatusTimer {
@@ -13491,6 +13511,30 @@ static NSString *ZNM613CandidateIdentity(NSDictionary *candidate) {
             candidate[@"argumentCount"]?:@0];
 }
 
+// A result belongs to its full method identity, never to the page-level status.
+static NSMutableDictionary<NSString *,NSString *> *ZNM613ResultStore(ZNRuntimeMenuControllerV040 *controller) {
+    NSMutableDictionary *store=objc_getAssociatedObject(controller,kZNM613ResultStoreKey);
+    if(!store){
+        store=[NSMutableDictionary dictionary];
+        objc_setAssociatedObject(controller,kZNM613ResultStoreKey,store,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return store;
+}
+static void ZNM613SetCandidateStatus(ZNRuntimeMenuControllerV040 *controller,
+                                     NSDictionary *candidate,NSString *status) {
+    if(!controller||![candidate isKindOfClass:NSDictionary.class])return;
+    NSString *identity=ZNM613CandidateIdentity(candidate);
+    if(!identity.length)return;
+    NSString *message=[status isKindOfClass:NSString.class]&&status.length?status:@"测试未返回状态";
+    ZNM613ResultStore(controller)[identity]=message;
+    // In-place update: do not rebuild the page or reset contentOffset / text inputs.
+    for(UIView *card in controller.contentView.subviews){
+        NSDictionary *bound=objc_getAssociatedObject(card,kZNM613CardCandidateKey);
+        if(!bound || ![ZNM613CandidateIdentity(bound) isEqualToString:identity])continue;
+        UILabel *label=objc_getAssociatedObject(card,kZNM613CardResultLabelKey);
+        if([label isKindOfClass:UILabel.class])label.text=message;
+    }
+}
 static NSMutableDictionary *ZNM613ArgumentStore(ZNRuntimeMenuControllerV040 *self) {
     NSMutableDictionary *store=objc_getAssociatedObject(self,kZNM613ArgumentStoreKey);
     if(!store){store=[NSMutableDictionary dictionary];objc_setAssociatedObject(self,kZNM613ArgumentStoreKey,store,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
@@ -13908,23 +13952,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     [self.contentView addSubview:filterCard];
     y+=52.0;
 
-    NSString *liveHookText=[[ZNNativeHookRuntime sharedRuntime] liveTestStatus];
-    NSString *pageStatus=liveHookText.length?liveHookText:[self zn60v3_status];
-    if(pageStatus.length){
-        BOOL live=liveHookText.length>0;
-        CGFloat statusH=live?88.0:48.0;
-        UIView *statusCard=[self cardAtY:y height:statusH width:width compact:NO];
-        UILabel *status=[self label:pageStatus size:(live?8.0:8.1) weight:UIFontWeightRegular
-                             color:(live?self.theme.primaryTextColor:self.theme.secondaryTextColor)];
-        status.tag=kZNM65LiveHookStatusTag;
-        status.frame=CGRectMake(13,6,statusCard.bounds.size.width-26,statusH-12);
-        status.numberOfLines=live?6:2;
-        if(live)status.font=[UIFont monospacedSystemFontOfSize:7.9 weight:UIFontWeightRegular];
-        [statusCard addSubview:status];
-        [self.contentView addSubview:statusCard];
-        y+=statusH+8.0;
-    }
-    [self znm65_startLiveHookStatusTimer];
+    // No page-level result card: status belongs to the selected method card.
 
     for(NSUInteger row=0;row<visible.count;row++){
         NSDictionary *candidate=visible[row];
@@ -13946,10 +13974,11 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         const CGFloat rightInset=10.0;
         const CGFloat topAreaH=140.0;
         CGFloat paramH=argc?22.0+(CGFloat)argc*62.0:0.0;
-        CGFloat statusBlockH=52.0;
+        CGFloat statusBlockH=90.0;
         CGFloat cardH=topAreaH+paramH+statusBlockH+8.0;
         UIView *card=[self cardAtY:y height:cardH width:width compact:NO];
         objc_setAssociatedObject(card,kZNM613AnalysisKey,analysis,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(card,kZNM613CardCandidateKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         CGFloat leftW=MAX(120.0,CGRectGetWidth(card.bounds)-railW-rightInset-23.0);
         UIButton *detail=[UIButton buttonWithType:UIButtonTypeCustom];
@@ -14124,11 +14153,21 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         statusLabel.numberOfLines=2;
         [card addSubview:statusLabel];
 
+        NSString *message=ZNM613ResultStore(self)[ZNM613CandidateIdentity(candidate)];
+        UILabel *resultLabel=[self label:(message.length?message:@"测试结果：尚未测试")
+                                    size:7.8 weight:UIFontWeightRegular color:self.theme.primaryTextColor];
+        resultLabel.frame=CGRectMake(13,py+46,CGRectGetWidth(card.bounds)-26,38);
+        resultLabel.numberOfLines=2;
+        resultLabel.lineBreakMode=NSLineBreakByTruncatingTail;
+        objc_setAssociatedObject(card,kZNM613CardResultLabelKey,resultLabel,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [card addSubview:resultLabel];
+
         [self.contentView addSubview:card];
         y+=cardH+8.0;
     }
 
     [self zn40_updateContentHeight:y];
+    [self znm65_startLiveHookStatusTimer];
 }
 
 - (void)zn52x_executeChainTapped:(UIButton *)sender {
