@@ -12311,13 +12311,13 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
         for(UILabel *label in card.subviews){
             if(![label isKindOfClass:UILabel.class]||![label.text hasPrefix:@"状态  Native Hook："])continue;
             NSString *hits=@"";
-            for(NSString *line in [diag componentsSeparatedByString:@"\\n"]){
+            for(NSString *line in [diag componentsSeparatedByString:@"\n"]){
                 if([line hasPrefix:@"Hits："]){hits=line;break;}
             }
             NSString *directLine=@"Direct Call：—";
             NSRange r=[label.text rangeOfString:@"Direct Call："];
             if(r.location!=NSNotFound)directLine=[label.text substringFromIndex:r.location];
-            label.text=[NSString stringWithFormat:@"状态  Native Hook：已安装%@%@\\n%@",
+            label.text=[NSString stringWithFormat:@"状态  Native Hook：已安装%@%@\n%@",
                         hits.length?@" · ":@"",hits,directLine];
             break;
         }
@@ -14067,6 +14067,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         }else{
             objc_setAssociatedObject(chain,kZN51CandidateKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
+        objc_setAssociatedObject(chain,kZNM613CardCandidateKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [card addSubview:chain];
 
         UIButton *reselect=[self zn40_button:@"重新选择实例"
@@ -14171,13 +14172,14 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 }
 
 - (void)zn52x_executeChainTapped:(UIButton *)sender {
+    NSDictionary *candidate=objc_getAssociatedObject(sender,kZNM613CardCandidateKey);
     ZNRuntimeMethodAction *action = objc_getAssociatedObject(sender, kZNM52XActionKey);
     if (!action) return;
     NSString *error = nil;
     NSDictionary *result = [[ZNIL2CPPInvokeEngine sharedEngine] executeAction:action error:&error];
     if (!result) {
         NSString *message = error.length ? error : @"未知错误";
-        [self zn60v3_setStatus:[NSString stringWithFormat:@"执行链失败：%@", message]];
+        ZNM613SetCandidateStatus(self,candidate,[NSString stringWithFormat:@"执行链失败：%@", message]);
         UIViewController *top = ZNM52XTop(self.hostWindow);
         if (top) {
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"执行链失败" message:message preferredStyle:UIAlertControllerStyleAlert];
@@ -14190,7 +14192,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     NSString *type = ZNM52XString(result[@"returnType"]);
     NSString *value = [result[@"returnValue"] description] ?: @"?";
     NSString *trace = ZNM52XTrace(result);
-    [self zn60v3_setStatus:[NSString stringWithFormat:@"执行链成功 · %@ = %@", type.length ? type : @"return", value]];
+    ZNM613SetCandidateStatus(self,candidate,[NSString stringWithFormat:@"执行链成功 · %@ = %@", type.length ? type : @"return", value]);
     [[ZNRuntimeLogger sharedLogger] log:[NSString stringWithFormat:@"[m5.2-chain-ui] %@ = %@\n%@", type.length ? type : @"return", value, trace ?: @""]];
     UIViewController *top = ZNM52XTop(self.hostWindow);
     if (top) {
@@ -14226,16 +14228,16 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 
     BOOL runtimeOK=[ZNM613AnalyzeCandidate(candidate)[@"runtimeOK"] boolValue];
     if(!runtimeOK){
-        [self zn60v3_setStatus:@"Runtime Method：当前 ABI 不支持直接执行；实例方法可长按“测试/捕获”捕获 receiver"];
-        [self renderPage];
+        ZNM613SetCandidateStatus(self,candidate,@"Runtime Method：当前 ABI 不支持直接执行；实例方法可长按“测试/捕获”捕获 receiver");
+        // In-place result label update; preserve scroll position and inputs.
         return;
     }
 
     NSUInteger argc=[candidate[@"argumentCount"] unsignedIntegerValue];
     NSArray<NSString *> *values=ZNM613ArgumentValues(self,candidate);
     if(values.count!=argc){
-        [self zn60v3_setStatus:@"Runtime Method：参数数量不匹配"];
-        [self renderPage];
+        ZNM613SetCandidateStatus(self,candidate,@"Runtime Method：参数数量不匹配");
+        // In-place result label update; preserve scroll position and inputs.
         return;
     }
     NSString *error=nil;
@@ -14247,16 +14249,16 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
           argumentCount:argc
          argumentValues:values
                   error:&error];
-    [self zn60v3_setStatus:result
+    ZNM613SetCandidateStatus(self,candidate,result
         ? [NSString stringWithFormat:@"Runtime Invoke SUCCESS：%@ args=%@",ZNM52XString(candidate[@"method"]),values]
-        : (error?:@"Runtime Invoke FAILED")];
-    [self renderPage];
+        : (error?:@"Runtime Invoke FAILED"));
+    // In-place result label update; preserve scroll position and inputs.
 }
 
 - (void)znm613_chainTapped:(UIButton *)sender {
     NSDictionary *candidate=objc_getAssociatedObject(sender,kZN51CandidateKey);
     if(!candidate){
-        [self zn60v3_setStatus:@"链式调用：candidate 绑定丢失"];
+        ZNM613SetCandidateStatus(self,candidate,@"链式调用：candidate 绑定丢失");
         [self renderPage];
         return;
     }
@@ -14266,7 +14268,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     NSDictionary *ret=[abi[@"return"] isKindOfClass:NSDictionary.class]?abi[@"return"]:@{};
     NSString *returnType=[ret[@"name"] isKindOfClass:NSString.class]?ret[@"name"]:@"";
     if((ZNIL2CPPABIValueKind)[ret[@"kind"] integerValue]!=ZNIL2CPPABIValueKindObjectReference){
-        [self zn60v3_setStatus:[NSString stringWithFormat:@"链式调用需要 managed-reference 返回值；当前=%@",returnType.length?returnType:@"?"]];
+        ZNM613SetCandidateStatus(self,candidate,[NSString stringWithFormat:@"链式调用需要 managed-reference 返回值；当前=%@",returnType.length?returnType:@"?"]);
         [self renderPage];
         return;
     }
@@ -14281,7 +14283,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 
     UIViewController *top=ZNM52XTop(self.hostWindow);
     if(!top){
-        [self zn60v3_setStatus:@"链式调用：找不到可展示配置页的 UIViewController"];
+        ZNM613SetCandidateStatus(self,candidate,@"链式调用：找不到可展示配置页的 UIViewController");
         [self renderPage];
         return;
     }
@@ -14304,7 +14306,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         NSString *cls=alert.textFields.count>1?alert.textFields[1].text:@"";
         NSString *method=alert.textFields.count>2?alert.textFields[2].text:@"";
         if(!cls.length||!method.length){
-            [selfRef zn60v3_setStatus:@"链式 Class/Method 不能为空"];
+            ZNM613SetCandidateStatus(selfRef,candidate,@"链式 Class/Method 不能为空");
             [selfRef renderPage];
             return;
         }
@@ -14316,7 +14318,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                                                               argumentValues:values
                                                                                        error:&error];
         if(!created){
-            [selfRef zn60v3_setStatus:error?:@"创建主 Runtime Method 失败"];
+            ZNM613SetCandidateStatus(selfRef,candidate,error?:@"创建主 Runtime Method 失败");
             [selfRef renderPage];
             return;
         }
@@ -14333,11 +14335,11 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                               @"argumentCount":@0,
                               @"argumentValues":@[]};
         if(index==NSNotFound||![[ZNRuntimeActionStore sharedStore] updateImmediateChain:chain atIndex:index error:&error]){
-            [selfRef zn60v3_setStatus:error?:@"保存 Immediate Chain 失败"];
+            ZNM613SetCandidateStatus(selfRef,candidate,error?:@"保存 Immediate Chain 失败");
             [selfRef renderPage];
             return;
         }
-        [selfRef zn60v3_setStatus:[NSString stringWithFormat:@"已创建链式方法：%@ → %@::%@/0",created.canonicalIdentity,cls,method]];
+        ZNM613SetCandidateStatus(selfRef,candidate,[NSString stringWithFormat:@"已创建链式方法：%@ → %@::%@/0",created.canonicalIdentity,cls,method]);
         [selfRef renderPage];
     }]];
 
@@ -14351,12 +14353,12 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 
     NSDictionary *analysis=ZNM613AnalyzeCandidate(candidate);
     if(![analysis[@"canCapture"] boolValue]){
-        [self zn60v3_setStatus:@"Receiver Capture：当前方法不是可捕获的实例方法"];
+        ZNM613SetCandidateStatus(self,candidate,@"Receiver Capture：当前方法不是可捕获的实例方法");
         [self renderPage];
         return;
     }
     if(ZNM47ReceiverCaptureBusy()){
-        [self zn60v3_setStatus:@"Receiver Capture：已有捕获任务运行中"];
+        ZNM613SetCandidateStatus(self,candidate,@"Receiver Capture：已有捕获任务运行中");
         [self renderPage];
         return;
     }
@@ -14372,7 +14374,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         __strong typeof(weakSelf) strong=weakSelf;
         if(!strong)return;
         if(!receiver){
-            [strong zn60v3_setStatus:captureError?:@"Receiver Capture：未捕获到实例"];
+            ZNM613SetCandidateStatus(strong,candidate,captureError?:@"Receiver Capture：未捕获到实例");
             [strong renderPage];
             return;
         }
@@ -14384,8 +14386,8 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                           namespace:namespaceName
                                           className:className
                                               error:&validationError]){
-            [strong zn60v3_setStatus:[NSString stringWithFormat:@"捕获到 x0=0x%llX，但类型验证失败：%@",
-                                      (unsigned long long)receiver,validationError?:@"unknown"]];
+            ZNM613SetCandidateStatus(strong,candidate,[NSString stringWithFormat:@"捕获到 x0=0x%llX，但类型验证失败：%@",
+                                      (unsigned long long)receiver,validationError?:@"unknown"]);
             [strong renderPage];
             return;
         }
@@ -14396,22 +14398,22 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                         namespace:namespaceName
                                         className:className
                                             error:&selectionError]){
-            [strong zn60v3_setStatus:selectionError?:@"Receiver Capture：保存 receiver 失败"];
+            ZNM613SetCandidateStatus(strong,candidate,selectionError?:@"Receiver Capture：保存 receiver 失败");
             [strong renderPage];
             return;
         }
 
-        [strong zn60v3_setStatus:[NSString stringWithFormat:@"Receiver Capture 成功：%@.%@ receiver=0x%llX",
-                                  className.length?className:@"?",methodName,(unsigned long long)receiver]];
+        ZNM613SetCandidateStatus(strong,candidate,[NSString stringWithFormat:@"Receiver Capture 成功：%@.%@ receiver=0x%llX",
+                                  className.length?className:@"?",methodName,(unsigned long long)receiver]);
         [strong renderPage];
     },&startError);
 
     if(!started){
-        [self zn60v3_setStatus:startError?:@"Receiver Capture 启动失败"];
+        ZNM613SetCandidateStatus(self,candidate,startError?:@"Receiver Capture 启动失败");
         [self renderPage];
         return;
     }
-    [self zn60v3_setStatus:[NSString stringWithFormat:@"Receiver Capture 中（5 秒）：请在游戏里触发 %@.%@",className.length?className:@"?",methodName]];
+    ZNM613SetCandidateStatus(self,candidate,[NSString stringWithFormat:@"Receiver Capture 中（5 秒）：请在游戏里触发 %@.%@",className.length?className:@"?",methodName]);
     [self renderPage];
 }
 - (void)znm613_createCurrentMode:(UIButton *)sender {
@@ -14427,18 +14429,18 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     if([mode isEqualToString:@"direct"]){
         NSString *why=nil;
         if(![[ZNDirectNativeCallEngine sharedEngine] supportsCandidate:candidate reason:&why]){
-            [self zn60v3_setStatus:why?:@"Direct Native Call ABI 不支持"];return;
+            ZNM613SetCandidateStatus(self,candidate,why?:@"Direct Native Call ABI 不支持");return;
         }
         ZNRuntimeMethodAction *created=[[ZNRuntimeActionStore sharedStore] addDirectNativeCallCandidate:candidate
                                                                                                   title:candidate[@"method"]
                                                                                          argumentValues:values
                                                                                                   error:&error];
-        [self zn60v3_setStatus:created?[NSString stringWithFormat:@"已创建 Direct Native Call：%@",created.canonicalIdentity]:(error?:@"创建 Direct Native Call 失败")];
+        ZNM613SetCandidateStatus(self,candidate,created?[NSString stringWithFormat:@"已创建 Direct Native Call：%@",created.canonicalIdentity]:(error?:@"创建 Direct Native Call 失败"));
         return;
     }
     if([mode isEqualToString:@"hook"]){
         NSDictionary *plan=ZNM613HookPlan(candidate,&error);
-        if(!plan){[self zn60v3_setStatus:error?:@"Native Hook 自动方案不可用"];[self renderPage];return;}
+        if(!plan){ZNM613SetCandidateStatus(self,candidate,error?:@"Native Hook 自动方案不可用");[self renderPage];return;}
         NSString *kind=plan[@"kind"];
         ZNNativeHookAction *created=nil;
         NSString *title=[NSString stringWithFormat:@"%@ Hook",ZNM52XString(candidate[@"method"])];
@@ -14458,7 +14460,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         }else if([kind isEqualToString:@"return-bool"]){
             created=[[ZNNativeHookStore sharedStore] addReturnBoolOverrideCandidate:candidate title:title value:YES error:&error];
         }
-        [self zn60v3_setStatus:created?[NSString stringWithFormat:@"已创建 Native Hook：%@",created.canonicalIdentity]:(error?:@"创建 Native Hook 失败")];
+        ZNM613SetCandidateStatus(self,candidate,created?[NSString stringWithFormat:@"已创建 Native Hook：%@",created.canonicalIdentity]:(error?:@"创建 Native Hook 失败"));
         return;
     }
 
@@ -14466,7 +14468,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                                                                     title:candidate[@"method"]
                                                                            argumentValues:values
                                                                                     error:&error];
-    [self zn60v3_setStatus:created?[NSString stringWithFormat:@"已创建 Runtime Method：%@",created.canonicalIdentity]:(error?:@"创建 Runtime Method 失败")];
+    ZNM613SetCandidateStatus(self,candidate,created?[NSString stringWithFormat:@"已创建 Runtime Method：%@",created.canonicalIdentity]:(error?:@"创建 Runtime Method 失败"));
 }
 
 - (void)znm613_applyOrRestoreHook:(UIButton *)sender {
@@ -14476,13 +14478,14 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     if([diag containsString:@"已安装"]){
         NSString *error=nil;
         BOOL ok=[[ZNNativeHookRuntime sharedRuntime] removeTemporaryHookForCandidate:candidate error:&error];
-        [self zn60v3_setStatus:ok?@"Native Hook 已恢复原方法":(error?:@"恢复 Hook 失败")];
-        [self renderPage];
+        ZNM613SetCandidateStatus(self,candidate,ok?@"Native Hook 已恢复原方法":(error?:@"恢复 Hook 失败"));
+        if(ok)[sender setTitle:@"应用 Hook" forState:UIControlStateNormal];
+        [self znm65_startLiveHookStatusTimer];
         return;
     }
 
     NSString *error=nil;NSDictionary *plan=ZNM613HookPlan(candidate,&error);
-    if(!plan){[self zn60v3_setStatus:error?:@"Native Hook 自动方案不可用"];return;}
+    if(!plan){ZNM613SetCandidateStatus(self,candidate,error?:@"Native Hook 自动方案不可用");return;}
     NSArray<NSString *> *values=ZNM613ArgumentValues(self,candidate);
     NSString *kind=plan[@"kind"];
     BOOL ok=NO;
@@ -14507,26 +14510,27 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     }else if([kind isEqualToString:@"return-bool"]){
         ok=[[ZNNativeHookRuntime sharedRuntime] installTemporaryReturnBoolOverrideForCandidate:candidate value:YES error:&error];
     }
-    [self zn60v3_setStatus:ok?[NSString stringWithFormat:@"Native Hook 已应用 · %@",kind]:(error?:@"应用 Hook 失败")];
-    [self renderPage];
+    ZNM613SetCandidateStatus(self,candidate,ok?[NSString stringWithFormat:@"Native Hook 已应用 · %@",kind]:(error?:@"应用 Hook 失败"));
+    if(ok)[sender setTitle:@"恢复 Hook" forState:UIControlStateNormal];
+    [self znm65_startLiveHookStatusTimer];
 }
 
 
 - (void)zn52x_directUnavailable:(UIButton *)sender {
     NSDictionary *candidate=objc_getAssociatedObject(sender,ZNNativeHookCandidateAssociationKey);
-    if(!candidate){[self zn60v3_setStatus:@"Direct Native Call：candidate 为空"];return;}
+    if(!candidate){ZNM613SetCandidateStatus(self,candidate,@"Direct Native Call：candidate 为空");return;}
     NSUInteger argc=[candidate[@"argumentCount"] unsignedIntegerValue];
     NSArray<NSString *> *values=ZNM613ArgumentValues(self,candidate);
     NSDictionary *analysis=ZNM613AnalyzeCandidate(candidate);
     NSString *reason=[analysis[@"directReason"] isKindOfClass:NSString.class]?analysis[@"directReason"]:@"";
     if(![analysis[@"directOK"] boolValue]){
-        [self zn60v3_setStatus:reason.length?reason:@"Direct Native Call：当前 ABI 不受支持"];
-        [self renderPage];
+        ZNM613SetCandidateStatus(self,candidate,reason.length?reason:@"Direct Native Call：当前 ABI 不受支持");
+        // In-place result label update; preserve scroll position and inputs.
         return;
     }
     ZNM613SetModeForCard(self,sender.superview,candidate,@"direct");
     if(values.count!=argc){
-        [self zn60v3_setStatus:[NSString stringWithFormat:@"Direct Native Call V1：当前结果卡仅支持 /0 或 /1 参数输入；方法需要 /%lu",(unsigned long)argc]];
+        ZNM613SetCandidateStatus(self,candidate,[NSString stringWithFormat:@"Direct Native Call V1：当前结果卡仅支持 /0 或 /1 参数输入；方法需要 /%lu",(unsigned long)argc]);
         return;
     }
     NSString *error=nil;
@@ -14534,11 +14538,11 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     BOOL ok=[adapter respondsToSelector:@selector(activateItem:value:error:)] &&
             [adapter activateItem:candidate value:values error:&error];
     NSDictionary *result=[ZNDirectNativeCallEngine sharedEngine].lastResult;
-    [self zn60v3_setStatus:ok
+    ZNM613SetCandidateStatus(self,candidate,ok
         ? [NSString stringWithFormat:@"Direct Native Call SUCCESS · %@ = %@",
            result[@"returnType"]?:@"return",result[@"returnValue"]?:@"void"]
-        : (error?:@"Direct Native Call FAILED")];
-    [self renderPage];
+        : (error?:@"Direct Native Call FAILED"));
+    // In-place result label update; preserve scroll position and inputs.
 }
 
 - (void)zn64_testModeTapped:(UIButton *)sender {
@@ -14581,8 +14585,8 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     NSString *error=nil;
     NSDictionary *plan=ZNM613HookPlan(candidate,&error);
     if(!plan){
-        [self zn60v3_setStatus:error?:@"Native Hook：unsupported"];
-        [self renderPage];
+        ZNM613SetCandidateStatus(self,candidate,error?:@"Native Hook：unsupported");
+        // In-place result label update; preserve scroll position and inputs.
         return;
     }
     ZNM613SetModeForCard(self,sender.superview,candidate,@"hook");
@@ -14590,8 +14594,8 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     NSString *extra=[kind isEqualToString:@"complex"]
         ? [NSString stringWithFormat:@" · %@ · %@",plan[@"type"]?:@"?",plan[@"codec"]?:@"?"]
         : (plan[@"index"]?[NSString stringWithFormat:@" · arg%lu",(unsigned long)[plan[@"index"] unsignedIntegerValue]+1]:@"");
-    [self zn60v3_setStatus:[NSString stringWithFormat:@"Native Hook READY · %@%@",kind,extra]];
-    [self renderPage];
+    ZNM613SetCandidateStatus(self,candidate,[NSString stringWithFormat:@"Native Hook READY · %@%@",kind,extra]);
+    // In-place result label update; preserve scroll position and inputs.
 }
 
 - (void)zn64_presentHookConfigForCandidate:(NSDictionary *)candidate
@@ -14631,17 +14635,17 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                                                                 argumentIndex:argumentIndex
                                                                                    multiplier:multiplier
                                                                                         error:&error];
-        [weakSelf zn60v3_setStatus:ok
+        ZNM613SetCandidateStatus(weakSelf,candidate,ok
             ? [NSString stringWithFormat:@"Native Hook 已安装 · %@ arg%lu ×%ld；实时状态见筛选栏下方",
                method,(unsigned long)argumentIndex,(long)multiplier]
-            : (error?:@"Native Hook 安装失败")];
+            : (error?:@"Native Hook 安装失败"));
         [weakSelf renderPage];
     }]];
 
     [alert addAction:[UIAlertAction actionWithTitle:@"恢复原方法" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){
         NSString *error=nil;
         BOOL ok=[[ZNNativeHookRuntime sharedRuntime] removeTemporaryHookForCandidate:candidate error:&error];
-        [weakSelf zn60v3_setStatus:ok?@"Native Hook 已移除，目标已恢复":(error?:@"恢复原方法失败")];
+        ZNM613SetCandidateStatus(weakSelf,candidate,ok?@"Native Hook 已移除，目标已恢复":(error?:@"恢复原方法失败"));
         [weakSelf renderPage];
     }]];
 
@@ -14658,9 +14662,9 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                                                                          max:maxValue
                                                                                 defaultValue:1
                                                                                        error:&error];
-        [weakSelf zn60v3_setStatus:created
+        ZNM613SetCandidateStatus(weakSelf,candidate,created
             ? [NSString stringWithFormat:@"已创建 Native Hook：%@ · Slider 1~%ld",created.title,(long)maxValue]
-            : (error?:@"创建 Native Hook 失败")];
+            : (error?:@"创建 Native Hook 失败"));
     }]];
 
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
@@ -14684,23 +14688,23 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     [alert addAction:[UIAlertAction actionWithTitle:@"安装测试 Hook · true" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         NSString *error=nil;
         BOOL ok=[[ZNNativeHookRuntime sharedRuntime] installTemporaryReturnBoolOverrideForCandidate:candidate value:YES error:&error];
-        [weakSelf zn60v3_setStatus:ok
+        ZNM613SetCandidateStatus(weakSelf,candidate,ok
             ? [NSString stringWithFormat:@"ReturnBoolOverride 已安装 · %@ → true；实时状态见筛选栏下方",method]
-            : (error?:@"ReturnBoolOverride 安装失败")];
+            : (error?:@"ReturnBoolOverride 安装失败"));
         [weakSelf renderPage];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"安装测试 Hook · false" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         NSString *error=nil;
         BOOL ok=[[ZNNativeHookRuntime sharedRuntime] installTemporaryReturnBoolOverrideForCandidate:candidate value:NO error:&error];
-        [weakSelf zn60v3_setStatus:ok
+        ZNM613SetCandidateStatus(weakSelf,candidate,ok
             ? [NSString stringWithFormat:@"ReturnBoolOverride 已安装 · %@ → false；实时状态见筛选栏下方",method]
-            : (error?:@"ReturnBoolOverride 安装失败")];
+            : (error?:@"ReturnBoolOverride 安装失败"));
         [weakSelf renderPage];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"恢复原方法" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){
         NSString *error=nil;
         BOOL ok=[[ZNNativeHookRuntime sharedRuntime] removeTemporaryHookForCandidate:candidate error:&error];
-        [weakSelf zn60v3_setStatus:ok?@"ReturnBoolOverride 已移除，目标已恢复":(error?:@"恢复原方法失败")];
+        ZNM613SetCandidateStatus(weakSelf,candidate,ok?@"ReturnBoolOverride 已移除，目标已恢复":(error?:@"恢复原方法失败"));
         [weakSelf renderPage];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"创建 Hook 方法 · force true" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
@@ -14710,9 +14714,9 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                                                                              title:title
                                                                                              value:YES
                                                                                              error:&error];
-        [weakSelf zn60v3_setStatus:created
+        ZNM613SetCandidateStatus(weakSelf,candidate,created
             ? [NSString stringWithFormat:@"已创建 ReturnBoolOverride：%@ · Switch",created.title]
-            : (error?:@"创建 ReturnBoolOverride 失败")];
+            : (error?:@"创建 ReturnBoolOverride 失败"));
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     UIViewController *top=ZNM52XTop(self.hostWindow);
@@ -14745,9 +14749,9 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                                                                                argumentIndex:argumentIndex
                                                                                                callbackValue:YES
                                                                                                        error:&error];
-        [weakSelf zn60v3_setStatus:ok
+        ZNM613SetCandidateStatus(weakSelf,candidate,ok
             ? [NSString stringWithFormat:@"Managed Callback Hook 已安装 · %@ · callback(true)；实时状态见筛选栏下方",method]
-            : (error?:@"Managed Callback Hook 安装失败")];
+            : (error?:@"Managed Callback Hook 安装失败"));
         [weakSelf renderPage];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"安装测试 Hook · Callback(false)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
@@ -14756,15 +14760,15 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                                                                                argumentIndex:argumentIndex
                                                                                                callbackValue:NO
                                                                                                        error:&error];
-        [weakSelf zn60v3_setStatus:ok
+        ZNM613SetCandidateStatus(weakSelf,candidate,ok
             ? [NSString stringWithFormat:@"Managed Callback Hook 已安装 · %@ · callback(false)；实时状态见筛选栏下方",method]
-            : (error?:@"Managed Callback Hook 安装失败")];
+            : (error?:@"Managed Callback Hook 安装失败"));
         [weakSelf renderPage];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"恢复原方法" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){
         NSString *error=nil;
         BOOL ok=[[ZNNativeHookRuntime sharedRuntime] removeTemporaryHookForCandidate:candidate error:&error];
-        [weakSelf zn60v3_setStatus:ok?@"Managed Callback Hook 已移除，目标已恢复":(error?:@"恢复原方法失败")];
+        ZNM613SetCandidateStatus(weakSelf,candidate,ok?@"Managed Callback Hook 已移除，目标已恢复":(error?:@"恢复原方法失败"));
         [weakSelf renderPage];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"创建 Hook 方法 · callback(true)" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
@@ -14776,9 +14780,9 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
                                                                                                callbackValue:YES
                                                                                                 skipOriginal:YES
                                                                                                        error:&error];
-        [weakSelf zn60v3_setStatus:created
+        ZNM613SetCandidateStatus(weakSelf,candidate,created
             ? [NSString stringWithFormat:@"已创建 Managed Callback Hook：%@",created.title]
-            : (error?:@"创建 Managed Callback Hook 失败")];
+            : (error?:@"创建 Managed Callback Hook 失败"));
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     UIViewController *top=ZNM52XTop(self.hostWindow);
@@ -14799,7 +14803,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     NSString *diag=nil,*findError=nil;
     NSArray<NSNumber *> *instances=[resolver candidateAddressesForAssembly:assembly namespace:ns className:cls limit:32 diagnostics:&diag error:&findError];
     if(!instances.count){
-        [self zn60v3_setStatus:findError ?: @"重新选择实例：没有找到活实例"];
+        ZNM613SetCandidateStatus(self,candidate,findError ?: @"重新选择实例：没有找到活实例");
         [self renderPage];
         return;
     }
@@ -14815,14 +14819,14 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         [alert addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
             NSString *selectionError=nil;
             BOOL ok=[[ZNIL2CPPInstanceResolver sharedResolver] znm44_selectInstanceAddress:address assembly:assembly namespace:ns className:cls error:&selectionError];
-            [weakSelf zn60v3_setStatus:ok
+            ZNM613SetCandidateStatus(weakSelf,candidate,ok
                 ? [NSString stringWithFormat:@"已重新选择 %@：0x%llX",cls.length?cls:@"Object",(unsigned long long)address]
-                : (selectionError ?: @"重新选择实例失败")];
+                : (selectionError ?: @"重新选择实例失败"));
             [weakSelf renderPage];
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *a){
-        [weakSelf zn60v3_setStatus:@"已取消重新选择；旧 receiver 已释放"];
+        ZNM613SetCandidateStatus(weakSelf,candidate,@"已取消重新选择；旧 receiver 已释放");
         [weakSelf renderPage];
     }]];
 
@@ -14844,7 +14848,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     NSString *diag=nil,*findError=nil;
     NSArray<NSNumber *> *instances=[[ZNIL2CPPInstanceResolver sharedResolver] candidateAddressesForAssembly:assembly namespace:ns className:cls limit:32 diagnostics:&diag error:&findError];
     if(!instances.count){
-        [self zn60v3_setStatus:findError ?: @"批量测试实例：没有找到活实例"];
+        ZNM613SetCandidateStatus(self,candidate,findError ?: @"批量测试实例：没有找到活实例");
         [self renderPage];
         return;
     }
@@ -14875,7 +14879,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         }
     }
 
-    [self zn60v3_setStatus:[NSString stringWithFormat:@"批量测试完成：%lu/%lu 成功；当前 receiver 未改变",(unsigned long)success,(unsigned long)instances.count]];
+    ZNM613SetCandidateStatus(self,candidate,[NSString stringWithFormat:@"批量测试完成：%lu/%lu 成功；当前 receiver 未改变",(unsigned long)success,(unsigned long)instances.count]);
     UIViewController *top=ZNM52XTop(self.hostWindow);
     if(top){
         UIAlertController *alert=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"批量测试实例 · %@::%@",cls,method]
