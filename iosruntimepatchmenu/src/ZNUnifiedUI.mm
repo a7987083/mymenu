@@ -3695,12 +3695,11 @@ static NSMutableSet<NSString *> *ZN50BExpandedKeys(ZNRuntimeMenuControllerV040 *
     import.enabled=!locked;
     import.accessibilityHint=@"导入 Runtime / Native Hook 配置或原有 Static Patch JSON";
     [targetCard addSubview:import];
-    // Display the planned export entry, but do not attach a no-op action.
     UIButton *exportButton=[self zn40_button:@"导出"
-                              selector:NULL
+                              selector:@selector(zn48_exportJSON:)
                                  frame:CGRectMake(toolbarMargin+pickerW+toolbarGap+actionW+toolbarGap,9,actionW,32)];
     exportButton.enabled=!workspace.isBuilding;
-    exportButton.accessibilityHint=@"导出所有 Runtime Method 和 Native Hook 配置";
+    exportButton.accessibilityHint=@"导出 Runtime Method 和 Native Hook 配置";
     [targetCard addSubview:exportButton];
     [self.contentView addSubview:targetCard];
     y += 60;
