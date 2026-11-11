@@ -10,6 +10,8 @@ static BOOL gZNM551Restoring = NO;
 static NSDictionary *ZNM551EncodeAction(ZNRuntimeMethodAction *a) {
     return @{
         @"title": a.title ?: @"",
+        @"description":a.featureDescription?:@"",
+        @"executionKind":@(a.executionKind),
         @"assembly": a.assembly ?: @"Assembly-CSharp.dll",
         @"namespace": a.namespaceName ?: @"",
         @"class": a.className ?: @"",
@@ -63,10 +65,10 @@ static void ZNM551Restore(void) {
             @"signatureAvailable": @(sig)
         };
         NSString *error = nil;
-        ZNRuntimeMethodAction *created = [[ZNRuntimeActionStore sharedStore] addMethodCandidate:candidate
-                                                                                         title:item[@"title"]
-                                                                                argumentValues:values
-                                                                                         error:&error];
+        ZNRuntimeActionStore *store=[ZNRuntimeActionStore sharedStore];
+        ZNRuntimeMethodAction *created=[item[@"executionKind"] integerValue]==ZNRuntimeExecutionKindDirectNativeCall?
+            [store addDirectNativeCallCandidate:candidate title:item[@"title"] argumentValues:values error:&error]:
+            [store addMethodCandidate:candidate title:item[@"title"] argumentValues:values error:&error];
         if (!created) {
             [[ZNRuntimeLogger sharedLogger] log:[NSString stringWithFormat:@"[m5.5.1-persist] restore skip %@::%@ error=%@", cls, method, error ?: @"unknown"]];
             continue;
@@ -76,6 +78,8 @@ static void ZNM551Restore(void) {
         if (configs.count == argc) [[ZNRuntimeActionStore sharedStore] updateArgumentControlConfigs:configs atIndex:index error:nil];
         NSDictionary *chain = [item[@"immediateChain"] isKindOfClass:NSDictionary.class] ? item[@"immediateChain"] : @{};
         if (chain.count) [[ZNRuntimeActionStore sharedStore] updateImmediateChain:chain atIndex:index error:nil];
+        if ([item[@"description"] isKindOfClass:NSString.class])
+            [[ZNRuntimeActionStore sharedStore] updateFeatureDescription:item[@"description"] atIndex:index error:nil];
         restored++;
     }
     gZNM551Restoring = NO;
@@ -85,6 +89,7 @@ static void ZNM551Restore(void) {
 @interface ZNRuntimeActionStore (ZNM551Persistence)
 - (ZNRuntimeMethodAction *)znm551_addMethodCandidate:(NSDictionary<NSString *, id> *)candidate title:(NSString *)title argumentValues:(NSArray<NSString *> *)argumentValues error:(NSString **)error;
 - (BOOL)znm551_updateTitle:(NSString *)title atIndex:(NSUInteger)index error:(NSString **)error;
+- (BOOL)znm551_updateFeatureDescription:(NSString *)description atIndex:(NSUInteger)index error:(NSString **)error;
 - (BOOL)znm551_updateArgumentValues:(NSArray<NSString *> *)argumentValues atIndex:(NSUInteger)index error:(NSString **)error;
 - (BOOL)znm551_updateArgumentControlConfigs:(NSArray<NSDictionary<NSString *, id> *> *)configs atIndex:(NSUInteger)index error:(NSString **)error;
 - (BOOL)znm551_updateImmediateChain:(NSDictionary<NSString *, id> *)chain atIndex:(NSUInteger)index error:(NSString **)error;
@@ -99,6 +104,7 @@ static void ZNM551Restore(void) {
     return result;
 }
 - (BOOL)znm551_updateTitle:(NSString *)title atIndex:(NSUInteger)index error:(NSString **)error { BOOL ok=[self znm551_updateTitle:title atIndex:index error:error]; if(ok) ZNM551Save(); return ok; }
+- (BOOL)znm551_updateFeatureDescription:(NSString *)description atIndex:(NSUInteger)index error:(NSString **)error { BOOL ok=[self znm551_updateFeatureDescription:description atIndex:index error:error]; if(ok) ZNM551Save(); return ok; }
 - (BOOL)znm551_updateArgumentValues:(NSArray<NSString *> *)argumentValues atIndex:(NSUInteger)index error:(NSString **)error { BOOL ok=[self znm551_updateArgumentValues:argumentValues atIndex:index error:error]; if(ok) ZNM551Save(); return ok; }
 - (BOOL)znm551_updateArgumentControlConfigs:(NSArray<NSDictionary<NSString *,id> *> *)configs atIndex:(NSUInteger)index error:(NSString **)error { BOOL ok=[self znm551_updateArgumentControlConfigs:configs atIndex:index error:error]; if(ok) ZNM551Save(); return ok; }
 - (BOOL)znm551_updateImmediateChain:(NSDictionary<NSString *,id> *)chain atIndex:(NSUInteger)index error:(NSString **)error { BOOL ok=[self znm551_updateImmediateChain:chain atIndex:index error:error]; if(ok) ZNM551Save(); return ok; }
@@ -118,6 +124,7 @@ extern "C" void ZNInstallM551AuthoringPersistenceDeferred(void) {
         Class cls = ZNRuntimeActionStore.class;
         ZNM551Swap(cls, @selector(addMethodCandidate:title:argumentValues:error:), @selector(znm551_addMethodCandidate:title:argumentValues:error:));
         ZNM551Swap(cls, @selector(updateTitle:atIndex:error:), @selector(znm551_updateTitle:atIndex:error:));
+        ZNM551Swap(cls, @selector(updateFeatureDescription:atIndex:error:), @selector(znm551_updateFeatureDescription:atIndex:error:));
         ZNM551Swap(cls, @selector(updateArgumentValues:atIndex:error:), @selector(znm551_updateArgumentValues:atIndex:error:));
         ZNM551Swap(cls, @selector(updateArgumentControlConfigs:atIndex:error:), @selector(znm551_updateArgumentControlConfigs:atIndex:error:));
         ZNM551Swap(cls, @selector(updateImmediateChain:atIndex:error:), @selector(znm551_updateImmediateChain:atIndex:error:));
