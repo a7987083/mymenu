@@ -2,6 +2,7 @@
 #import "ZNRuntimeActionModel.h"
 #import "ZNNativeHookAction.h"
 #import "ZNIL2CPPResolver.h"
+#import "ZNIL2CPPMethodSignature.h"
 
 static NSDictionary *ZNPortableRuntimeRecord(ZNRuntimeMethodAction *a) {
     return @{
@@ -165,8 +166,19 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
             return NO;
         }
         [pendingMethods addObject:key];
-        if(![resolver resolveMethodAssembly:assembly namespace:ns className:cls method:method argumentCount:argc.integerValue]){
-            if(error)*error=[NSString stringWithFormat:@"Runtime 目标未找到：%@ · %@",key,resolver.lastError?:@""];
+        NSArray *types=d[@"parameterTypeNames"];
+        if(![d[@"signatureAvailable"] boolValue]||![types isKindOfClass:NSArray.class]||
+           types.count!=(NSUInteger)argc.integerValue){
+            if(error)*error=[NSString stringWithFormat:@"Runtime 缺少完整方法签名，需在旧游戏重新定位：%@",key];
+            return NO;
+        }
+        for(id type in types)if(![type isKindOfClass:NSString.class]||![type length]){
+            if(error)*error=@"Runtime 参数类型无效";return NO;
+        }
+        NSString *resolveError=nil;
+        if(![[ZNIL2CPPFullSignatureResolver sharedResolver] resolveAssembly:assembly namespace:ns
+            className:cls method:method parameterTypeNames:types error:&resolveError]){
+            if(error)*error=[NSString stringWithFormat:@"Runtime 签名不匹配：%@ · %@",key,resolveError?:@""];
             return NO;
         }
     }
@@ -197,8 +209,19 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
             }
         }
         [pendingHooks addObject:key];
-        if(![resolver resolveMethodAssembly:assembly namespace:ns className:cls method:method argumentCount:argc.integerValue]){
-            if(error)*error=[NSString stringWithFormat:@"Native Hook 目标未找到：%@ · %@",key,resolver.lastError?:@""];
+        NSArray *types=d[@"parameterTypeNames"];
+        if(![d[@"signatureAvailable"] boolValue]||![types isKindOfClass:NSArray.class]||
+           types.count!=(NSUInteger)argc.integerValue){
+            if(error)*error=[NSString stringWithFormat:@"Native Hook 缺少完整方法签名：%@",key];
+            return NO;
+        }
+        for(id type in types)if(![type isKindOfClass:NSString.class]||![type length]){
+            if(error)*error=@"Native Hook 参数类型无效";return NO;
+        }
+        NSString *resolveError=nil;
+        if(![[ZNIL2CPPFullSignatureResolver sharedResolver] resolveAssembly:assembly namespace:ns
+            className:cls method:method parameterTypeNames:types error:&resolveError]){
+            if(error)*error=[NSString stringWithFormat:@"Native Hook 签名不匹配：%@ · %@",key,resolveError?:@""];
             return NO;
         }
     }
@@ -209,7 +232,10 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
         NSString *title=[d[@"title"] isKindOfClass:NSString.class]?d[@"title"]:@"";
         NSArray *values=d[@"argumentValues"];
         NSString *err=nil;
-        ZNRuntimeMethodAction *a=[[ZNRuntimeActionStore sharedStore] addMethodCandidate:candidate title:title argumentValues:values error:&err];
+        ZNRuntimeExecutionKind kind=(ZNRuntimeExecutionKind)[d[@"executionKind"] integerValue];
+        ZNRuntimeMethodAction *a=kind==ZNRuntimeExecutionKindDirectNativeCall?
+            [store addDirectNativeCallCandidate:candidate title:title argumentValues:values error:&err]:
+            [store addMethodCandidate:candidate title:title argumentValues:values error:&err];
         if(!a){if(error)*error=err?:@"Runtime 方法添加失败";return NO;}
         NSUInteger index=[[store actionsSnapshot] count]-1;
         if(![store updateArgumentControlConfigs:d[@"argumentControlConfigs"] atIndex:index error:&err]){
