@@ -55,6 +55,32 @@ static NSString *ZN44StringFromFixed(const char *bytes, size_t cap, NSString *fa
     return s.length ? s : (fallback ?: @"");
 }
 
+// Read-only ZNF1 title decoder. Matches ZNFeatureMetadataCodec.mm's on-disk
+// 72-byte layout without linking developer-only metadata authoring dependencies.
+static NSDictionary<NSString *, NSString *> *ZN44DecodeZNF1Display(const ZN44StaticEntry *entry) {
+    if (!entry) return nil;
+    const uint8_t *raw=(const uint8_t *)entry->title;
+    if(raw[0]!=0 || raw[48]!=0 || raw[1]!=0xA5 || raw[2]!=0x5A || raw[3]!=1)
+        return nil;
+    uint64_t featureID=0;
+    memcpy(&featureID,raw+5,sizeof(featureID));
+    NSUInteger count=raw[13];
+    if(!featureID || count==0 || count>57)return nil;
+    uint8_t buffer[57]={0};
+    for(NSUInteger i=0;i<count;i++){
+        uint64_t x=featureID ^ UINT64_C(0x9E3779B97F4A7C15) ^
+            ((uint64_t)i*UINT64_C(0xD6E8FEB86659FD93));
+        x^=x>>12;x^=x<<25;x^=x>>27;
+        x*=UINT64_C(0x2545F4914F6CDD1D);
+        uint8_t obfuscated=i<34?raw[14+i]:raw[49+(i-34)];
+        buffer[i]=obfuscated^(uint8_t)(x>>56);
+    }
+    NSString *name=[[NSString alloc] initWithBytes:buffer length:count encoding:NSUTF8StringEncoding];
+    if(!name.length)return nil;
+    BOOL explicitGroup=(raw[4]&0x01)!=0;
+    return @{@"title":name,@"group":explicitGroup?name:@"Imported"};
+}
+
 static BOOL ZN44HeaderValid(const ZN44StaticHeader *h, uintptr_t headerAddress, uintptr_t segmentEnd) {
     if (!h) return NO;
     if (h->magic0 != ZN44_STATIC_MAGIC0 || h->magic1 != ZN44_STATIC_MAGIC1) return NO;
@@ -241,8 +267,11 @@ static BOOL ZN44CurrentTargetValid(const ZN44StaticHeader *header,
 
         ZNStaticPatchRecord *record = [ZNStaticPatchRecord new];
         record.target = targetName;
-        record.title = ZN44StringFromFixed(entry->title, sizeof(entry->title), [NSString stringWithFormat:@"Patch #%u", entry->patchID]);
-        record.group = ZN44StringFromFixed(entry->group, sizeof(entry->group), @"Imported");
+        NSDictionary<NSString *, NSString *> *display=ZN44DecodeZNF1Display(entry);
+        // Legacy plain-text metadata remains readable for older generated binaries.
+        record.title=display[@"title"] ?: ZN44StringFromFixed(entry->title,sizeof(entry->title),
+            [NSString stringWithFormat:@"Patch #%u",entry->patchID]);
+        record.group=display[@"group"] ?: ZN44StringFromFixed(entry->group,sizeof(entry->group),@"Imported");
         record.featureDescription=@"";
         if(descriptionEntries){
             const ZN44FeatureDescriptionEntry *desc=&descriptionEntries[e];
