@@ -222,6 +222,13 @@ static uint32_t ZNNHFNV1a32(NSString *text) {
     return a;
 }
 
+- (BOOL)validateAuthoringDictionary:(NSDictionary<NSString *, id> *)record error:(NSString **)error {
+    if(![self actionFromDictionary:record]){
+        if(error)*error=@"Native Hook 模板或参数无效";
+        return NO;
+    }
+    return YES;
+}
 - (BOOL)importAuthoringDictionary:(NSDictionary<NSString *, id> *)record error:(NSString **)error {
     ZNNativeHookAction *action=[self actionFromDictionary:record];
     if(!action) {
