@@ -1608,11 +1608,7 @@ static void ZNInstallV044BinaryBuilder(void){@autoreleasepool{Class cls=NSClassF
 #import "ZNPatchJSONImporter.h"
 #import "ZNAuthoringJSONImport.h"
 
-// v0.4.8 JSON import layer.
-// Primary path: scan only the immediate directory that contains developer file
-// `1`, regardless of JSON filename. If exactly one JSON contains recognizable
-// Patch entries, import it automatically. Manual document picker remains a
-// fallback and reads the selected URL through coordinated security-scoped I/O.
+// JSON import/export: iOS document picker, typed authoring metadata and legacy Patch JSON.
 
 static UIViewController *ZN48TopViewController(UIViewController *vc) {
     if (!vc) return nil;
@@ -1645,6 +1641,7 @@ static void ZN48RelabelJSONList(UIView *view) {
 
 @interface ZNRuntimeMenuControllerV040 (V048) <UIDocumentPickerDelegate>
 - (void)zn48_importJSON:(id)sender;
+- (void)zn48_exportJSON:(id)sender;
 - (void)zn48_presentManualPicker;
 - (void)zn48_renderOther;
 - (void)zn48_makeUI:(UIWindow *)window;
@@ -1670,6 +1667,43 @@ static void ZN48RelabelJSONList(UIView *view) {
         return;
     }
     [presenter presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)zn48_exportJSON:(id)sender {
+    ZNBinaryPatchWorkspace *ws=[ZNBinaryPatchWorkspace sharedWorkspace];
+    if(ws.isBuilding){ws.lastStatus=@"生成进行中，请完成后导出";[self renderPage];return;}
+    NSString *error=nil;
+    NSData *data=[ZNAuthoringJSONImport exportDataWithError:&error];
+    if(!data.length){
+        ws.lastStatus=[NSString stringWithFormat:@"导出失败：%@",error?:@"无可导出数据"];
+        [self renderPage];return;
+    }
+    NSString *name=[NSString stringWithFormat:@"Zonoe-Authoring-%@.json",NSUUID.UUID.UUIDString];
+    NSURL *file=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:name]];
+    NSError *writeError=nil;
+    if(![data writeToURL:file options:NSDataWritingAtomic error:&writeError]){
+        ws.lastStatus=[NSString stringWithFormat:@"导出失败：%@",writeError.localizedDescription?:@"无法写入文件"];
+        [self renderPage];return;
+    }
+    UIWindow *window=self.hostWindow?:UIApplication.sharedApplication.keyWindow;
+    UIViewController *presenter=ZN48TopViewController(window.rootViewController);
+    if(!presenter){
+        ws.lastStatus=@"导出失败：没有可用于分享文件的窗口";
+        [[NSFileManager defaultManager] removeItemAtURL:file error:nil];
+        [self renderPage];return;
+    }
+    UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
+    share.completionWithItemsHandler=^(__unused UIActivityType type,__unused BOOL completed,
+                                      __unused NSArray *returned,__unused NSError *activityError){
+        [[NSFileManager defaultManager] removeItemAtURL:file error:nil];
+    };
+    UIPopoverPresentationController *popover=share.popoverPresentationController;
+    if(popover){
+        UIView *source=[sender isKindOfClass:UIView.class]?sender:self.contentView;
+        popover.sourceView=source;popover.sourceRect=source.bounds;
+    }
+    ws.lastStatus=@"已生成配置 JSON，请在分享界面保存到文件";
+    [presenter presentViewController:share animated:YES completion:nil];
 }
 
 - (void)zn48_importJSON:(id)sender {
@@ -3644,8 +3678,7 @@ static NSMutableSet<NSString *> *ZN50BExpandedKeys(ZNRuntimeMenuControllerV040 *
     ZN50BNormalizeImportedGroups(workspace);
     BOOL locked = workspace.hasAnyApplied || workspace.isBuilding;
 
-    // Phase 1: compact target picker and backup UI. The existing import
-    // remains Patch JSON-only; unified Runtime/Native configuration comes later.
+    // Compact binary target selector with typed import/export actions.
     UIView *targetCard = [self cardAtY:y height:52 width:width compact:NO];
     CGFloat cardW=CGRectGetWidth(targetCard.bounds);
     CGFloat toolbarMargin=9.0, toolbarGap=6.0, actionW=57.0;
@@ -3660,15 +3693,14 @@ static NSMutableSet<NSString *> *ZN50BExpandedKeys(ZNRuntimeMenuControllerV040 *
                               selector:@selector(zn44_importJSON:)
                                  frame:CGRectMake(toolbarMargin+pickerW+toolbarGap,9,actionW,32)];
     import.enabled=!locked;
-    import.accessibilityHint=@"当前导入功能仅支持原有 Patch JSON";
+    import.accessibilityHint=@"导入 Runtime / Native Hook 配置或原有 Static Patch JSON";
     [targetCard addSubview:import];
     // Display the planned export entry, but do not attach a no-op action.
     UIButton *exportButton=[self zn40_button:@"导出"
                               selector:NULL
                                  frame:CGRectMake(toolbarMargin+pickerW+toolbarGap+actionW+toolbarGap,9,actionW,32)];
-    exportButton.enabled=NO;
-    exportButton.alpha=0.45;
-    exportButton.accessibilityHint=@"Runtime Method 和 Native Hook 配置导出将在下一阶段接入";
+    exportButton.enabled=!workspace.isBuilding;
+    exportButton.accessibilityHint=@"导出所有 Runtime Method 和 Native Hook 配置";
     [targetCard addSubview:exportButton];
     [self.contentView addSubview:targetCard];
     y += 60;
