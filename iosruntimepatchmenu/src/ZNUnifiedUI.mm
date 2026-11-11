@@ -1669,6 +1669,25 @@ static void ZN48RelabelJSONList(UIView *view) {
     [presenter presentViewController:picker animated:YES completion:nil];
 }
 
+static NSString *ZN48ExportGameFileName(void) {
+    NSDictionary *info=NSBundle.mainBundle.infoDictionary?:@{};
+    NSCharacterSet *forbidden=[NSCharacterSet characterSetWithCharactersInString:@"/\\:*?\"<>|"];
+    NSMutableCharacterSet *unsafe=[forbidden mutableCopy];
+    [unsafe formUnionWithCharacterSet:NSCharacterSet.controlCharacterSet];
+    NSCharacterSet *trim=[NSCharacterSet characterSetWithCharactersInString:@" .\t\r\n"];
+    for(NSString *key in @[@"CFBundleDisplayName",@"CFBundleExecutable",@"CFBundleName"]) {
+        id raw=info[key];
+        if(![raw isKindOfClass:NSString.class])continue;
+        NSString *clean=[[(NSString *)raw componentsSeparatedByCharactersInSet:unsafe] componentsJoinedByString:@"_"];
+        clean=[clean stringByTrimmingCharactersInSet:trim];
+        if(!clean.length)continue;
+        if(clean.length>80)clean=[clean substringToIndex:80];
+        clean=[clean stringByTrimmingCharactersInSet:trim];
+        if(clean.length)return [clean stringByAppendingPathExtension:@"json"];
+    }
+    return @"Game.json";
+}
+
 - (void)zn48_exportJSON:(id)sender {
     ZNBinaryPatchWorkspace *ws=[ZNBinaryPatchWorkspace sharedWorkspace];
     if(ws.isBuilding){ws.lastStatus=@"生成进行中，请完成后导出";[self renderPage];return;}
@@ -1678,24 +1697,31 @@ static void ZN48RelabelJSONList(UIView *view) {
         ws.lastStatus=[NSString stringWithFormat:@"导出失败：%@",error?:@"无可导出数据"];
         [self renderPage];return;
     }
-    NSString *name=[NSString stringWithFormat:@"Zonoe-Authoring-%@.json",NSUUID.UUID.UUIDString];
-    NSURL *file=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:name]];
+    // Unique temporary folder avoids collisions while the user sees GameName.json.
+    NSURL *directory=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"zn-export-%@",NSUUID.UUID.UUIDString]] isDirectory:YES];
     NSError *writeError=nil;
+    if(![[NSFileManager defaultManager] createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:&writeError]){
+        ws.lastStatus=[NSString stringWithFormat:@"导出失败：%@",writeError.localizedDescription?:@"无法创建临时目录"];
+        [self renderPage];return;
+    }
+    NSURL *file=[directory URLByAppendingPathComponent:ZN48ExportGameFileName()];
     if(![data writeToURL:file options:NSDataWritingAtomic error:&writeError]){
         ws.lastStatus=[NSString stringWithFormat:@"导出失败：%@",writeError.localizedDescription?:@"无法写入文件"];
+        [[NSFileManager defaultManager] removeItemAtURL:directory error:nil];
         [self renderPage];return;
     }
     UIWindow *window=self.hostWindow?:UIApplication.sharedApplication.keyWindow;
     UIViewController *presenter=ZN48TopViewController(window.rootViewController);
     if(!presenter){
         ws.lastStatus=@"导出失败：没有可用于分享文件的窗口";
-        [[NSFileManager defaultManager] removeItemAtURL:file error:nil];
+        [[NSFileManager defaultManager] removeItemAtURL:directory error:nil];
         [self renderPage];return;
     }
     UIActivityViewController *share=[[UIActivityViewController alloc] initWithActivityItems:@[file] applicationActivities:nil];
     share.completionWithItemsHandler=^(__unused UIActivityType type,__unused BOOL completed,
                                       __unused NSArray *returned,__unused NSError *activityError){
-        [[NSFileManager defaultManager] removeItemAtURL:file error:nil];
+        [[NSFileManager defaultManager] removeItemAtURL:directory error:nil];
     };
     UIPopoverPresentationController *popover=share.popoverPresentationController;
     if(popover){
