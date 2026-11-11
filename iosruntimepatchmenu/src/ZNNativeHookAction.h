@@ -110,6 +110,7 @@ NS_ASSUME_NONNULL_BEGIN
                                                           error:(NSString * _Nullable * _Nullable)error;
 - (NSArray<ZNNativeHookAction *> *)actionsSnapshot;
 // Import authoring descriptor only; rejects duplicates and resets version-specific prepared addresses.
+- (BOOL)validateAuthoringDictionary:(NSDictionary<NSString *, id> *)record error:(NSString * _Nullable * _Nullable)error;
 - (BOOL)importAuthoringDictionary:(NSDictionary<NSString *, id> *)record error:(NSString * _Nullable * _Nullable)error;
 
 // Build-time only: persists the final prepared RVA/static/UUID descriptor that
