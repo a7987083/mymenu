@@ -222,6 +222,48 @@ static uint32_t ZNNHFNV1a32(NSString *text) {
     return a;
 }
 
+- (BOOL)importAuthoringDictionary:(NSDictionary<NSString *, id> *)record error:(NSString **)error {
+    ZNNativeHookAction *action=[self actionFromDictionary:record];
+    if(!action) {
+        if(error)*error=@"Native Hook 配置字段或模板参数无效";
+        return NO;
+    }
+    // Old binary-specific addresses cannot safely migrate to a new release.
+    action.preparedDescriptor=NO;action.preparedRVA=0;action.preparedUUID=@"";
+    action.preparedStaticKnown=NO;action.preparedIsStatic=NO;
+    action.preparedCodecGetterRVA=0;action.preparedCodecSetterRVA=0;
+    action.staticPrepatch=NO;action.staticHookSlotRVA=0;
+    action.staticTrampolineRVA=0;action.staticCodeCaveRVA=0;
+    action.staticDisplacedInstruction=0;action.fallbackRVA=0;action.fallbackUUID=@"";
+    @synchronized(self) {
+        for(ZNNativeHookAction *existing in self.mutableActions) {
+            if([existing.canonicalIdentity isEqualToString:action.canonicalIdentity] &&
+               existing.templateKind==action.templateKind &&
+               existing.argumentIndex==action.argumentIndex &&
+               existing.fieldArgumentIndex==action.fieldArgumentIndex) {
+                if(error)*error=@"Native Hook 已存在同一目标与模板配置";
+                return NO;
+            }
+        }
+        BOOL conflict=YES;
+        while(conflict) {
+            conflict=NO;
+            if(action.actionID==0)action.actionID=ZNNHFNV1a32([NSString stringWithFormat:@"%@|%u|%@",
+                action.canonicalIdentity,(unsigned)action.templateKind,action.title?:@""]);
+            for(ZNNativeHookAction *existing in self.mutableActions) {
+                if(existing.actionID==action.actionID) {
+                    action.actionID=action.actionID==UINT32_MAX?1:action.actionID+1;
+                    conflict=YES;
+                    break;
+                }
+            }
+        }
+        [self.mutableActions addObject:action];
+        [self persist];
+    }
+    return YES;
+}
+
 - (void)loadPersisted {
     NSArray *saved=[NSUserDefaults.standardUserDefaults objectForKey:kZNNativeHookStoreKey];
     if(![saved isKindOfClass:NSArray.class])return;
