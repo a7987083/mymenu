@@ -55,109 +55,28 @@
 - (NSString *)lastError { return _lastError ?: @""; }
 - (BOOL)awaitingZonoe { return _awaitingZonoe; }
 
-- (NSString *)trimLine:(NSString *)line {
-    return [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-}
-
-- (BOOL)loadMarkerOnce {
-    NSString *documents = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/1"];
-    NSString *root = [NSHomeDirectory() stringByAppendingPathComponent:@"1"];
-    NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *path = [fm fileExistsAtPath:documents] ? documents : ([fm fileExistsAtPath:root] ? root : nil);
-
-    _markerPresent = (path != nil);
-    _markerPath = path ?: @"";
-    _authorizedUDID = @"";
-    _markerHasG = NO;
-    _markerHasQ = NO;
-
-    if (!path) {
-        _lastError = @"首次点击激活时未找到开发者标记文件 1";
-        return NO;
-    }
-
-    NSError *error = nil;
-    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&error];
-    if (!text) {
-        _lastError = [NSString stringWithFormat:@"首次点击激活时读取标记文件失败：%@", error.localizedDescription ?: @"未知错误"];
-        return NO;
-    }
-
-    if ([text hasPrefix:@"\uFEFF"]) text = [text substringFromIndex:1];
-    text = [text stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
-    text = [text stringByReplacingOccurrencesOfString:@"\r" withString:@"\n"];
-
-    NSArray<NSString *> *lines = [text componentsSeparatedByString:@"\n"];
-    for (NSString *raw in lines) {
-        NSString *line = [self trimLine:raw];
-        if (!line.length) continue;
-        if ([line isEqualToString:@"g"]) {
-            _markerHasG = YES;
-            continue;
-        }
-        if ([line isEqualToString:@"q"]) {
-            _markerHasQ = YES;
-            continue;
-        }
-        // First non-token line remains optional display-only metadata.
-        if (!_authorizedUDID.length) _authorizedUDID = line;
-    }
-
-    if (!_markerHasG && !_markerHasQ) {
-        _lastError = @"标记文件存在，但未找到 q/g 权限标记";
-    } else {
-        _lastError = @"";
-    }
-    return YES;
-}
-
+// Developer build: all local authoring panels are available without marker file 1.
 - (void)refresh {
-    // v0.5.5 policy: developer permission is a first-menu-activation snapshot.
-    // Legacy callers may still invoke refresh from menu/timer paths, but those
-    // calls must never touch the filesystem after the first evaluation.
-    @synchronized (self) {
-        if (_activationEvaluated) return;
-        _activationEvaluated = YES;
-
-        _authorized = NO;
-        _otherAuthorized = NO;
-        _observedUDID = @"";
-        _identitySource = ZNIdentitySourceNone;
-        _hostBridgeAvailable = NO;
-        _awaitingZonoe = NO;
-
-        if (![self loadMarkerOnce]) {
-            [[ZNRuntimeLogger sharedLogger] log:@"[dev-gate] first-activation snapshot: public mode"];
-            return;
-        }
-
-        _authorized = _markerHasG;
-        _otherAuthorized = _markerHasQ;
-        if (_authorized || _otherAuthorized) {
-            _observedUDID = _authorizedUDID ?: @"";
-            _identitySource = ZNIdentitySourceMarkerFile;
-        }
-
-        [[ZNRuntimeLogger sharedLogger] log:[NSString stringWithFormat:
-            @"[dev-gate] first-activation snapshot cached: g=%@ q=%@ marker=%@",
-            _authorized ? @"ON" : @"OFF",
-            _otherAuthorized ? @"ON" : @"OFF",
-            _markerPath.length ? _markerPath : @"none"]];
+    @synchronized(self) {
+        if(_activationEvaluated)return;
+        _activationEvaluated=YES;
+        _authorized=YES;
+        _otherAuthorized=YES;
+        _markerPresent=NO;
+        _markerPath=@"";
+        _authorizedUDID=@"";
+        _observedUDID=@"";
+        _identitySource=ZNIdentitySourceNone;
+        _lastError=@"";
+        _hostBridgeAvailable=NO;
+        _awaitingZonoe=NO;
+        [[ZNRuntimeLogger sharedLogger] log:@"[dev-gate] developer build: all panels enabled"];
     }
 }
-
-- (void)requestZonoeValidation {
-    // Compatibility entry point only. Runtime re-check is deliberately disabled;
-    // changing file 1 takes effect on the next game process launch.
-    [[ZNRuntimeLogger sharedLogger] log:@"[dev-gate] runtime recheck ignored; restart game to re-evaluate file 1"];
-}
-
+- (void)requestZonoeValidation { [self refresh]; }
 - (void)submitHostUDID:(NSString *)udid authorized:(BOOL)authorized {
-    (void)udid;
-    (void)authorized;
-    [[ZNRuntimeLogger sharedLogger] log:@"[dev-gate] host identity submission ignored; startup file-1 snapshot is authoritative"];
+    (void)udid; (void)authorized;
 }
-
 - (NSString *)sourceDescription {
     switch (_identitySource) {
         case ZNIdentitySourceMarkerFile: return @"首次点击标记文件";
@@ -175,14 +94,7 @@
 }
 
 - (NSString *)diagnosticReport {
-    return [NSString stringWithFormat:@"开发者标记: %@\n首次点击检查: 已缓存，本进程不重新读取\n诊断/Debug(g): %@\n其他(q): %@\n标记文件: %@\n标记附加值: %@\n来源: %@\n运行时重检: 已禁用（重启游戏生效）\nHost Bridge: 已禁用\nLocal Ticket: 已禁用\n错误: %@\n",
-            self.markerPresent ? @"已找到" : @"未找到",
-            self.authorized ? @"显示" : @"隐藏",
-            self.otherAuthorized ? @"显示" : @"隐藏",
-            self.markerPath.length ? self.markerPath : @"未找到",
-            [self maskedUDID:self.authorizedUDID],
-            [self sourceDescription],
-            self.lastError.length ? self.lastError : @"无"];
+    return @"开发端：所有功能已启用，不再检查文件 1";
 }
 @end
 
