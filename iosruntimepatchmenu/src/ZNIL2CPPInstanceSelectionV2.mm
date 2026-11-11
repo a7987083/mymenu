@@ -162,11 +162,43 @@ static void *ZNM44ResolveClass(NSString *assembly,
         [[ZNRuntimeLogger sharedLogger] log:[NSString stringWithFormat:@"[instance-selection-v2] stale selection cleared %@!%@.%@ · %@",
                                              assembly ?: @"", namespaceName ?: @"", className ?: @"", validationError ?: @"invalid"]];
     }
-    return [self znm44_originalResolveUniqueInstanceForAssembly:assembly
-                                                      namespace:namespaceName
-                                                      className:className
-                                                    diagnostics:diagnostics
-                                                          error:error];
+    // A uniquely discovered receiver becomes the session selection. Without
+    // this binding, the next invocation fails when another same-class object
+    // appears, even though the original receiver remains valid.
+    void *unique = [self znm44_originalResolveUniqueInstanceForAssembly:assembly
+                                                              namespace:namespaceName
+                                                              className:className
+                                                            diagnostics:diagnostics
+                                                                  error:error];
+    if (!unique) return NULL;
+
+    NSString *bindingError = nil;
+    if ([self znm44_selectInstanceAddress:(uintptr_t)unique
+                                 assembly:assembly
+                                namespace:namespaceName
+                                className:className
+                                    error:&bindingError]) {
+        // GCHandle-backed selections can move; always use the resolved target.
+        uintptr_t bound = [self znm44_selectedInstanceForAssembly:assembly
+                                                        namespace:namespaceName
+                                                        className:className];
+        if (bound) {
+            if (diagnostics) *diagnostics = [NSString stringWithFormat:
+                @"auto-bound-session-instance 0x%llX", (unsigned long long)bound];
+            if (error) *error = nil;
+            return (void *)bound;
+        }
+    }
+
+    // Preserve the previous unique-instance behavior if binding is unavailable.
+    // Never resolve an ambiguous set by guessing its first address.
+    [[ZNRuntimeLogger sharedLogger] log:[NSString stringWithFormat:
+        @"[instance-selection-v2] unique receiver binding unavailable %@!%@.%@ · %@",
+        assembly ?: @"", namespaceName ?: @"", className ?: @"",
+        bindingError ?: @"selection target unavailable"]];
+    if (diagnostics) *diagnostics = @"unique-instance (session binding unavailable)";
+    if (error) *error = nil;
+    return unique;
 }
 
 @end
