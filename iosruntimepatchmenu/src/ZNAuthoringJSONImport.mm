@@ -56,6 +56,21 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
         if(error)*error=@"配置数量超过导入器的 256 条限制";
         return nil;
     }
+    // Do not claim a portable backup when exact signatures are unavailable.
+    for(ZNRuntimeMethodAction *a in methods) {
+        if(!a.signatureAvailable||a.parameterTypeNames.count!=a.argumentCount) {
+            if(error)*error=[NSString stringWithFormat:@"无法安全导出：Runtime %@::%@ 缺少完整参数签名，请先重新定位",
+                             a.className?:@"",a.methodName?:@""];
+            return nil;
+        }
+    }
+    for(ZNNativeHookAction *a in hooks) {
+        if(!a.signatureAvailable||a.parameterTypeNames.count!=a.argumentCount) {
+            if(error)*error=[NSString stringWithFormat:@"无法安全导出：Native Hook %@::%@ 缺少完整参数签名，请先重新定位",
+                             a.className?:@"",a.methodName?:@""];
+            return nil;
+        }
+    }
     NSMutableArray *runtime=[NSMutableArray arrayWithCapacity:methods.count];
     NSMutableArray *native=[NSMutableArray arrayWithCapacity:hooks.count];
     for(ZNRuntimeMethodAction *a in methods)[runtime addObject:ZNPortableRuntimeRecord(a)];
