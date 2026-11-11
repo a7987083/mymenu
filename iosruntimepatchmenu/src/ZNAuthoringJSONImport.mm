@@ -42,7 +42,7 @@
     }
     NSMutableSet<NSString *> *existingMethods=[NSMutableSet set];
     for(ZNRuntimeMethodAction *a in [store actionsSnapshot])
-        [existingMethods addObject:a.canonicalIdentity?:@""];
+        [existingMethods addObject:[NSString stringWithFormat:@"%@|%@|%@|%@|%lu",a.assembly?:@"",a.namespaceName?:@"",a.className?:@"",a.methodName?:@"",(unsigned long)a.argumentCount]];
     NSMutableSet<NSString *> *existingHooks=[NSMutableSet set];
     for(ZNNativeHookAction *a in [hookStore actionsSnapshot])
         [existingHooks addObject:[NSString stringWithFormat:@"%@|%u|%lu|%lu",a.canonicalIdentity?:@"",
@@ -77,9 +77,28 @@
             if(error)*error=@"Runtime 控件配置必须是对象";
             return NO;
         }
+        for(NSDictionary *config in d[@"argumentControlConfigs"]){
+            NSString *type=[config[@"type"] isKindOfClass:NSString.class]?config[@"type"]:@"";
+            if(![@[@"fixed",@"switch",@"button",@"number",@"slider"] containsObject:type]){
+                if(error)*error=@"Runtime 控件类型不支持";return NO;
+            }
+        }
+        id chain=d[@"immediateChain"];
+        if(chain && ![chain isKindOfClass:NSDictionary.class]){
+            if(error)*error=@"Immediate Chain 类型无效";return NO;
+        }
+        if([chain isKindOfClass:NSDictionary.class] && [chain count]){
+            NSString *chainClass=chain[@"class"],*chainMethod=chain[@"method"];
+            NSNumber *chainArgc=chain[@"argumentCount"];
+            if(![chainClass isKindOfClass:NSString.class]||!chainClass.length||
+               ![chainMethod isKindOfClass:NSString.class]||!chainMethod.length||
+               ![chainArgc isKindOfClass:NSNumber.class]||chainArgc.integerValue<0||chainArgc.integerValue>8){
+                if(error)*error=@"Immediate Chain 描述符无效";return NO;
+            }
+        }
         NSString *key=[NSString stringWithFormat:@"%@|%@|%@|%@|%@",assembly,ns,cls,method,argc];
-        if([pendingMethods containsObject:key]){
-            if(error)*error=[NSString stringWithFormat:@"JSON 存在重复 Runtime 方法：%@",key];
+        if([existingMethods containsObject:key] || [pendingMethods containsObject:key]){
+            if(error)*error=[NSString stringWithFormat:@"Runtime 方法已存在或 JSON 重复：%@",key];
             return NO;
         }
         [pendingMethods addObject:key];
@@ -102,6 +121,17 @@
             assembly,ns,cls,method,argc,d[@"templateKind"]?:@0,d[@"argumentIndex"]?:@0];
         if([pendingHooks containsObject:key]){
             if(error)*error=[NSString stringWithFormat:@"重复 Native Hook：%@",key];return NO;
+        }
+        for(ZNNativeHookAction *oldAction in [hookStore actionsSnapshot]){
+            if([oldAction.assembly isEqualToString:assembly]&&
+               [oldAction.namespaceName isEqualToString:ns]&&
+               [oldAction.className isEqualToString:cls]&&
+               [oldAction.methodName isEqualToString:method]&&
+               oldAction.argumentCount==(NSUInteger)argc.integerValue&&
+               oldAction.templateKind==[d[@"templateKind"] unsignedIntValue]&&
+               oldAction.argumentIndex==[d[@"argumentIndex"] unsignedIntegerValue]){
+                if(error)*error=@"目标 Native Hook 已存在，请勿重复导入";return NO;
+            }
         }
         [pendingHooks addObject:key];
         if(![resolver resolveMethodAssembly:assembly namespace:ns className:cls method:method argumentCount:argc.integerValue]){
