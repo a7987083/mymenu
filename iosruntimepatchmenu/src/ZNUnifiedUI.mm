@@ -1606,6 +1606,7 @@ static void ZNInstallV044BinaryBuilder(void){@autoreleasepool{Class cls=NSClassF
 // END inlined ZonoeRuntimeMenuV045.mm
 #import "ZNBinaryPatchWorkspace.h"
 #import "ZNPatchJSONImporter.h"
+#import "ZNAuthoringJSONImport.h"
 
 // v0.4.8 JSON import layer.
 // Primary path: scan only the immediate directory that contains developer file
@@ -1674,57 +1675,9 @@ static void ZN48RelabelJSONList(UIView *view) {
 - (void)zn48_importJSON:(id)sender {
     (void)sender;
     ZNBinaryPatchWorkspace *ws=[ZNBinaryPatchWorkspace sharedWorkspace];
-    if (ws.hasAnyApplied || ws.isBuilding) return;
+    if(ws.hasAnyApplied||ws.isBuilding)return;
     [self.hostWindow endEditing:YES];
-
-    if (ws.showJSONFiles) {
-        ws.showJSONFiles=NO;
-        [self renderPage];
-        return;
-    }
-
-    [ws refreshJSONFiles];
-    NSArray<NSString *> *all=ws.jsonFiles;
-    NSMutableArray<NSString *> *valid=[NSMutableArray array];
-    NSMutableArray<NSString *> *invalid=[NSMutableArray array];
-
-    for (NSString *path in all) {
-        NSString *probeError=nil;
-        NSArray *items=[ZNPatchJSONImporter importFile:path error:&probeError];
-        if (items.count) [valid addObject:path];
-        else [invalid addObject:[NSString stringWithFormat:@"%@：%@",path.lastPathComponent,probeError?:@"非 Patch JSON"]];
-    }
-
-    if (valid.count==1) {
-        NSString *path=valid.firstObject;
-        NSString *importError=nil;
-        if ([ws importJSONAtPath:path error:&importError]) {
-            ws.lastStatus=[NSString stringWithFormat:@"自动导入成功：%@ · Patch %lu · 同目录 JSON %lu",path.lastPathComponent,(unsigned long)ws.filledCount,(unsigned long)all.count];
-        } else {
-            ws.lastStatus=[NSString stringWithFormat:@"自动导入失败：%@",importError?:@"未知错误"];
-        }
-        ws.showJSONFiles=NO;
-        [self renderPage];
-        return;
-    }
-
-    if (valid.count>1) {
-        ws.showJSONFiles=YES;
-        ws.lastStatus=[NSString stringWithFormat:@"与 1 同目录发现 %lu 个 JSON，其中 %lu 个可识别 Patch；请选择",(unsigned long)all.count,(unsigned long)valid.count];
-        [self renderPage];
-        ZN48RelabelJSONList(self.contentView);
-        return;
-    }
-
-    ws.showJSONFiles=NO;
-    NSString *discovery=[ZNPatchJSONImporter discoveryStatus];
-    if (all.count) {
-        NSString *detail=invalid.firstObject?:@"没有可识别的 Patch JSON";
-        ws.lastStatus=[NSString stringWithFormat:@"%@ · 未识别 Patch JSON · %@ · 打开手动选择",discovery,detail];
-    } else {
-        ws.lastStatus=[NSString stringWithFormat:@"%@ · 打开手动选择",discovery];
-    }
-    [self renderPage];
+    // Unified entry: file picker identifies Patch JSON vs typed authoring JSON.
     [self zn48_presentManualPicker];
 }
 
@@ -1770,14 +1723,28 @@ static void ZN48RelabelJSONList(UIView *view) {
         return;
     }
 
-    NSString *importError=nil;
-    BOOL ok=[ws importJSONAtPath:tmp error:&importError];
-    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
-    if (ok) {
-        ws.lastStatus=[NSString stringWithFormat:@"手动导入成功：%@ · Patch %lu",name,(unsigned long)ws.filledCount];
-    } else {
-        ws.lastStatus=[NSString stringWithFormat:@"手动导入失败：%@",importError?:@"未知错误"];
+    NSString *importError=nil,*importStatus=nil;
+    NSError *decodeError=nil;
+    id root=[NSJSONSerialization JSONObjectWithData:data options:0 error:&decodeError];
+    BOOL isAuthoring=[ZNAuthoringJSONImport isAuthoringConfiguration:root];
+    BOOL hasReservedFormat=[root isKindOfClass:NSDictionary.class]&&
+        [root[@"format"] isKindOfClass:NSString.class]&&
+        [root[@"format"] hasPrefix:@"zonoe-"];
+    BOOL ok=NO;
+    if(!root){
+        importError=decodeError.localizedDescription?:@"JSON 格式无效";
+    }else if(isAuthoring){
+        ok=[ZNAuthoringJSONImport importData:data status:&importStatus error:&importError];
+    }else if(hasReservedFormat){
+        importError=@"未知的 Zonoe 配置格式；不会作为 Patch JSON 导入";
+    }else{
+        ok=[ws importJSONAtPath:tmp error:&importError];
+        if(ok)importStatus=[NSString stringWithFormat:@"Patch %lu",(unsigned long)ws.filledCount];
     }
+    [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
+    ws.lastStatus=ok?
+        [NSString stringWithFormat:@"导入成功：%@ · %@",name,importStatus?:@"已校验"]:
+        [NSString stringWithFormat:@"导入失败：%@",importError?:@"未知错误"];
     ws.showJSONFiles=NO;
     [self renderPage];
 }
@@ -3689,7 +3656,7 @@ static NSMutableSet<NSString *> *ZN50BExpandedKeys(ZNRuntimeMenuControllerV040 *
                                        tag:440000
                                    enabled:!locked];
     [targetCard addSubview:target];
-    UIButton *import=[self zn40_button:(workspace.showJSONFiles ? @"收起" : @"导入")
+    UIButton *import=[self zn40_button:@"导入"
                               selector:@selector(zn44_importJSON:)
                                  frame:CGRectMake(toolbarMargin+pickerW+toolbarGap,9,actionW,32)];
     import.enabled=!locked;
