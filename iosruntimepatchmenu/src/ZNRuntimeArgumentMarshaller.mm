@@ -221,4 +221,40 @@ static void *ZNMARSymbol(NSString *imagePath, const char *name) {
     return [payload mutableCopy];
 }
 
+
+// Only for an explicit out value-type slot; never use a guessed struct size.
++ (nullable NSMutableData *)zeroInitializedByRefValueTypeForMethod:(uintptr_t)methodInfo
+                                                            index:(NSUInteger)index
+                                                        imagePath:(NSString *)imagePath
+                                                            error:(NSString **)error {
+    if (!methodInfo || index > UINT32_MAX) {
+        if (error) *error = @"FAILED_BYREF_ABI：MethodInfo/参数序号无效";
+        return nil;
+    }
+    ZNMARMethodParamFn getParam = (ZNMARMethodParamFn)ZNMARSymbol(imagePath, "il2cpp_method_get_param");
+    ZNMARClassFromTypeFn fromType = (ZNMARClassFromTypeFn)ZNMARSymbol(imagePath, "il2cpp_class_from_type");
+    if (!fromType) fromType = (ZNMARClassFromTypeFn)ZNMARSymbol(imagePath, "il2cpp_class_from_il2cpp_type");
+    ZNMARClassValueSizeFn valueSize = (ZNMARClassValueSizeFn)ZNMARSymbol(imagePath, "il2cpp_class_value_size");
+    typedef bool (*ClassIsValueTypeFn)(void *);
+    ClassIsValueTypeFn isValue = (ClassIsValueTypeFn)ZNMARSymbol(imagePath, "il2cpp_class_is_valuetype");
+    if (!getParam || !fromType || !valueSize || !isValue) {
+        if (error) *error = @"FAILED_BYREF_ABI：缺少 IL2CPP 元数据 API";
+        return nil;
+    }
+    const void *type = getParam((const void *)methodInfo, (uint32_t)index);
+    void *klass = type ? fromType(type) : NULL;
+    if (!klass || !isValue(klass)) {
+        if (error) *error = @"FAILED_BYREF_ABI：目标不是可验证的值类型";
+        return nil;
+    }
+    uint32_t alignment = 0;
+    int32_t size = valueSize(klass, &alignment);
+    if (size <= 0 || size > 4096 || !alignment || alignment > 16) {
+        if (error) *error = [NSString stringWithFormat:@"FAILED_BYREF_LAYOUT：size=%d align=%u",size,alignment];
+        return nil;
+    }
+    if (error) *error = nil;
+    return [NSMutableData dataWithLength:(NSUInteger)size];
+}
+
 @end

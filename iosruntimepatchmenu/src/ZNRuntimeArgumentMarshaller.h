@@ -25,6 +25,13 @@ typedef NSData * _Nullable (^ZNRuntimeValueTypeEncoder)(NSString *text,
                                                     imagePath:(NSString *)imagePath
                                                         error:(NSString * _Nullable * _Nullable)error;
 
+/// Allocate a verified unboxed value-type slot for an explicit by-ref "out"
+/// argument. Uses the MethodInfo parameter's IL2CPP element class and size.
++ (nullable NSMutableData *)zeroInitializedByRefValueTypeForMethod:(uintptr_t)methodInfo
+                                                            index:(NSUInteger)index
+                                                        imagePath:(NSString *)imagePath
+                                                            error:(NSString * _Nullable * _Nullable)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

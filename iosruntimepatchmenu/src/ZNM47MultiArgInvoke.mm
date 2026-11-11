@@ -99,6 +99,39 @@ static BOOL ZNM47ParseComponents(NSString *text, NSUInteger expected, float out[
     return YES;
 }
 
+
+typedef const void *(*ZNM47MethodParamFn)(const void *, uint32_t);
+typedef void *(*ZNM47ClassFromTypeFn)(const void *);
+typedef bool (*ZNM47ClassIsValueTypeFn)(void *);
+typedef uint32_t (*ZNM47TypeGetAttrsFn)(const void *);
+
+static BOOL ZNM47ByRefClass(uintptr_t methodInfo, NSUInteger index, NSString *path,
+                            BOOL *valueType, BOOL *outOnly, NSString **error) {
+    ZNM47MethodParamFn getParam=(ZNM47MethodParamFn)ZNM47Symbol(path,"il2cpp_method_get_param");
+    ZNM47ClassFromTypeFn fromType=(ZNM47ClassFromTypeFn)ZNM47Symbol(path,"il2cpp_class_from_type");
+    if (!fromType) fromType=(ZNM47ClassFromTypeFn)ZNM47Symbol(path,"il2cpp_class_from_il2cpp_type");
+    ZNM47ClassIsValueTypeFn isValue=(ZNM47ClassIsValueTypeFn)ZNM47Symbol(path,"il2cpp_class_is_valuetype");
+    ZNM47TypeGetAttrsFn getAttrs=(ZNM47TypeGetAttrsFn)ZNM47Symbol(path,"il2cpp_type_get_attrs");
+    if (!getParam || !fromType || !isValue || !getAttrs) {
+        if (error) *error=@"FAILED_BYREF_ABI：类型/方向元数据不可用";
+        return NO;
+    }
+    const void *type=getParam((const void *)methodInfo,(uint32_t)index);
+    void *klass=type?fromType(type):NULL;
+    if (!klass) {
+        if (error) *error=@"FAILED_BYREF_ABI：无法解析元素 Class";
+        return NO;
+    }
+    *valueType=isValue(klass);
+    *outOnly=(getAttrs(type)&0x0002u)!=0; // PARAM_ATTRIBUTE_OUT
+    return YES;
+}
+
+static NSString *ZNM47ByRefTypeName(NSString *name) {
+    NSString *s=ZNM47Trim(name);
+    return [s hasSuffix:@"&"]?[s substringToIndex:s.length-1]:s;
+}
+
 static NSDictionary *ZNM47ResolveAction(ZNRuntimeMethodAction *action, NSString **error) {
     if (action.signatureAvailable && action.parameterTypeNames.count == action.argumentCount) {
         return [[ZNIL2CPPFullSignatureResolver sharedResolver] resolveAssembly:action.assembly
@@ -214,6 +247,9 @@ static void *ZNM47InstanceForAction(ZNRuntimeMethodAction *action, NSString **di
     double f64[ZN_RUNTIME_ACTION_MAX_ARGUMENTS] = {};
     float structValues[ZN_RUNTIME_ACTION_MAX_ARGUMENTS][4] = {};
     void *managedStrings[ZN_RUNTIME_ACTION_MAX_ARGUMENTS] = {};
+    void *byRefObjects[ZN_RUNTIME_ACTION_MAX_ARGUMENTS] = {};
+    BOOL byRefValues[ZN_RUNTIME_ACTION_MAX_ARGUMENTS] = {};
+    BOOL byRefStructs[ZN_RUNTIME_ACTION_MAX_ARGUMENTS] = {};
     NSMutableArray<NSMutableData *> *encodedValueTypes = [NSMutableArray array];
     NSMutableArray<NSString *> *types = [NSMutableArray arrayWithCapacity:n];
 
@@ -222,7 +258,97 @@ static void *ZNM47InstanceForAction(ZNRuntimeMethodAction *action, NSString **di
         NSString *type = [param[@"name"] isKindOfClass:NSString.class] ? param[@"name"] : @"?";
         NSString *text = action.argumentValues[i] ?: @"";
         [types addObject:type];
-        if ([param[@"byRef"] boolValue]) { if (error) *error = [NSString stringWithFormat:@"FAILED_UNSUPPORTED_ARGUMENT_TYPE：参数%lu ref/out 暂不支持", (unsigned long)i + 1]; return nil; }
+        if ([param[@"byRef"] boolValue]) {
+            NSString *element=ZNM47ByRefTypeName(type);
+            BOOL isValue=NO, isOut=NO;
+            NSString *metadataError=nil;
+            if (!ZNM47ByRefClass(methodInfo,i,resolver.unityPath,&isValue,&isOut,&metadataError)) {
+                if (error) *error=metadataError;
+                return nil;
+            }
+            NSString *input=ZNM47Trim(text);
+            BOOL zeroOut=[input.lowercaseString isEqualToString:@"out"] ||
+                         (isOut && input.length==0);
+            byRefValues[i]=YES;
+            if (!isValue) {
+                // A ref class needs a managed object, not an unboxed struct.
+                // Accept only explicitly null/metadata-out or a String created
+                // through IL2CPP. Never accept arbitrary object addresses.
+                if (zeroOut || [input.lowercaseString isEqualToString:@"null"]) {
+                    byRefObjects[i]=NULL;
+                } else if (ZNM47IsString(element)) {
+                    if (!stringNew) { if (error) *error=@"FAILED_STRING_API：il2cpp_string_new 未导出"; return nil; }
+                    managedStrings[i]=stringNew(text.UTF8String ?: "");
+                    if (!managedStrings[i]) { if (error) *error=@"FAILED_BYREF_OBJECT：String 创建失败"; return nil; }
+                    byRefObjects[i]=managedStrings[i];
+                } else {
+                    if (error) *error=[NSString stringWithFormat:
+                        @"FAILED_BYREF_OBJECT：参数%lu %@ 仅接受 null/out；复杂对象无法从文本安全构造",
+                        (unsigned long)i+1,element];
+                    return nil;
+                }
+                params[i]=&byRefObjects[i];
+                continue;
+            }
+            if (zeroOut) {
+                NSString *layoutError=nil;
+                NSMutableData *slot=[ZNRuntimeArgumentMarshaller zeroInitializedByRefValueTypeForMethod:methodInfo
+                                                                                                  index:i
+                                                                                              imagePath:resolver.unityPath
+                                                                                                  error:&layoutError];
+                if (!slot) { if (error) *error=layoutError?:@"FAILED_BYREF_LAYOUT"; return nil; }
+                [encodedValueTypes addObject:slot];
+                params[i]=slot.mutableBytes;
+                byRefStructs[i]=YES;
+                continue;
+            }
+            // Only exact primitive widths, not the ABI classifier's
+            // sbyte/int16 -> int32 widening aliases.
+            if ([element isEqualToString:@"System.Boolean"] || [element isEqualToString:@"bool"]) {
+                if (!ZNM47ParseBool(text,&boolValues[i])) { if (error) *error=@"FAILED_BYREF_VALUE：Bool 输入无效"; return nil; }
+                params[i]=&boolValues[i];
+            } else if ([element isEqualToString:@"System.Int32"] || [element isEqualToString:@"int"]) {
+                int64_t v=0;
+                if (!ZNM47ParseSigned(text,&v) || v<INT32_MIN || v>INT32_MAX) { if(error)*error=@"FAILED_BYREF_VALUE：Int32 输入无效"; return nil; }
+                s32[i]=(int32_t)v;params[i]=&s32[i];
+            } else if ([element isEqualToString:@"System.UInt32"] || [element isEqualToString:@"uint"]) {
+                uint64_t v=0;
+                if (!ZNM47ParseUnsigned(text,&v) || v>UINT32_MAX) { if(error)*error=@"FAILED_BYREF_VALUE：UInt32 输入无效"; return nil; }
+                u32[i]=(uint32_t)v;params[i]=&u32[i];
+            } else if ([element isEqualToString:@"System.Int64"] || [element isEqualToString:@"long"]) {
+                if (!ZNM47ParseSigned(text,&s64[i])) { if(error)*error=@"FAILED_BYREF_VALUE：Int64 输入无效"; return nil; }
+                params[i]=&s64[i];
+            } else if ([element isEqualToString:@"System.UInt64"] || [element isEqualToString:@"ulong"]) {
+                if (!ZNM47ParseUnsigned(text,&u64[i])) { if(error)*error=@"FAILED_BYREF_VALUE：UInt64 输入无效"; return nil; }
+                params[i]=&u64[i];
+            } else if ([element isEqualToString:@"System.Single"] || [element isEqualToString:@"float"]) {
+                double v=0;
+                if (!ZNM47ParseDouble(text,&v) || !isfinite(v) || fabs(v)>FLT_MAX) { if(error)*error=@"FAILED_BYREF_VALUE：Single 输入无效"; return nil; }
+                f32[i]=(float)v;params[i]=&f32[i];
+            } else if ([element isEqualToString:@"System.Double"] || [element isEqualToString:@"double"]) {
+                if (!ZNM47ParseDouble(text,&f64[i]) || !isfinite(f64[i])) { if(error)*error=@"FAILED_BYREF_VALUE：Double 输入无效"; return nil; }
+                params[i]=&f64[i];
+            } else {
+                // Shared existing codec validates exact IL2CPP struct layout.
+                // It also handles registered encoders and explicit hex input.
+                NSString *codecError=nil;
+                NSMutableData *payload=[ZNRuntimeArgumentMarshaller encodeValueTypeParameterForMethod:methodInfo
+                                                                                               index:i
+                                                                                                type:element
+                                                                                               input:text
+                                                                                           imagePath:resolver.unityPath
+                                                                                               error:&codecError];
+                if (!payload) {
+                    if(error)*error=[NSString stringWithFormat:@"FAILED_BYREF_CODEC：参数%lu %@：%@",
+                        (unsigned long)i+1,element,codecError?:@"未知值类型"];
+                    return nil;
+                }
+                [encodedValueTypes addObject:payload];
+                params[i]=payload.mutableBytes;
+                byRefStructs[i]=YES;
+            }
+            continue;
+        }
         if ([param[@"pointer"] boolValue]) { if (error) *error = [NSString stringWithFormat:@"FAILED_UNSUPPORTED_ARGUMENT_TYPE：参数%lu pointer 暂不支持", (unsigned long)i + 1]; return nil; }
 
         if (ZNM47IsString(type)) {
@@ -296,6 +422,24 @@ static void *ZNM47InstanceForAction(ZNRuntimeMethodAction *action, NSString **di
     void *returnObject = runtimeInvoke((const void *)methodInfo, target, params, &exception);
     if (exception) { if (error) *error = [NSString stringWithFormat:@"FAILED_MANAGED_EXCEPTION：exception=0x%llX", (unsigned long long)(uintptr_t)exception]; return nil; }
 
+    NSMutableArray<NSDictionary *> *byRefResults=[NSMutableArray array];
+    for (NSUInteger i=0;i<n;i++) {
+        if (!byRefValues[i]) continue;
+        NSString *element=ZNM47ByRefTypeName(types[i]);
+        id value=@"updated (value type)";
+        if (!byRefStructs[i]) {
+            if ([element isEqualToString:@"System.Boolean"] || [element isEqualToString:@"bool"]) value=@(boolValues[i]!=0);
+            else if ([element isEqualToString:@"System.Int32"] || [element isEqualToString:@"int"]) value=@(s32[i]);
+            else if ([element isEqualToString:@"System.UInt32"] || [element isEqualToString:@"uint"]) value=@(u32[i]);
+            else if ([element isEqualToString:@"System.Int64"] || [element isEqualToString:@"long"]) value=@(s64[i]);
+            else if ([element isEqualToString:@"System.UInt64"] || [element isEqualToString:@"ulong"]) value=@(u64[i]);
+            else if ([element isEqualToString:@"System.Single"] || [element isEqualToString:@"float"]) value=@(f32[i]);
+            else if ([element isEqualToString:@"System.Double"] || [element isEqualToString:@"double"]) value=@(f64[i]);
+            else value=byRefObjects[i]?@"managed reference set":@"null";
+        }
+        [byRefResults addObject:@{@"index":@(i),@"type":element,@"value":value}];
+    }
+
     [[ZNRuntimeLogger sharedLogger] log:[NSString stringWithFormat:@"[m4.7-multiarg] SUCCESS %@ args=%@ types=%@ receiver=%@",
                                          action.canonicalIdentity, action.argumentValues, types,
                                          isStatic ? @"static" : instanceDiagnostics ?: @"instance"]];
@@ -307,6 +451,7 @@ static void *ZNM47InstanceForAction(ZNRuntimeMethodAction *action, NSString **di
         @"returnObject": @((uintptr_t)returnObject),
         @"parameterTypes": types,
         @"argumentValues": action.argumentValues ?: @[],
+        @"byRefResults": byRefResults,
         @"multiArg": @YES,
     };
 }
@@ -332,6 +477,6 @@ extern "C" void ZNInstallM47MultiArgInvokeDeferred(void) {
     dispatch_once(&onceToken, ^{
         ZNM47Swap(ZNIL2CPPInvokeEngine.class, @selector(executeAction:error:), @selector(znm47_executeAction:error:));
         ZNM47Swap(ZNIL2CPPInvokeEngine.class, @selector(capabilities), @selector(znm47_capabilities));
-        [[ZNRuntimeLogger sharedLogger] log:@"[m4.7-multiarg] /2-/8 primitive,string,Vector/Quaternion/Color invoke layer installed"];
+        [[ZNRuntimeLogger sharedLogger] log:@"[m4.7-multiarg] /2-/8 invoke + metadata-backed by-ref slots installed"];
     });
 }
