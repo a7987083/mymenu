@@ -131,55 +131,25 @@ static void ZNJICollectJSONNamesPOSIX(NSString *root, NSMutableOrderedSet<NSStri
 
 @implementation ZNPatchJSONImporter
 + (NSArray<NSString *> *)discoverJSONFiles {
-    // The file `1` is the only anchor. JSON can have any basename but must be
-    // an immediate sibling of `1`. No recursive scan, no fixed Documents/
-    // Application Support assumption, and no BundleID-derived filename.
-    ZNDeveloperGate *gate=[ZNDeveloperGate sharedGate];
-    [gate refresh];
-    NSString *marker=gate.markerPath;
-    if (!marker.length) {
-        gZNJIDiscoveryStatus=@"自动扫描失败：未找到文件 1";
-        return @[];
-    }
-
-    NSString *root=[marker stringByDeletingLastPathComponent];
+    // Developer mode no longer requires marker file 1. Keep legacy automatic
+    // Patch JSON discovery confined to the app Documents directory.
+    NSString *root=[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
     NSFileManager *fm=NSFileManager.defaultManager;
-    BOOL isDir=NO;
-    if (![fm fileExistsAtPath:root isDirectory:&isDir] || !isDir) {
-        gZNJIDiscoveryStatus=[NSString stringWithFormat:@"自动扫描失败：1 的父目录不存在 · %@",root];
+    NSError *readError=nil;
+    NSArray<NSString *> *names=[fm contentsOfDirectoryAtPath:root error:&readError];
+    if(!names){
+        gZNJIDiscoveryStatus=[NSString stringWithFormat:@"JSON 扫描失败：%@",readError.localizedDescription?:@"目录不可访问"];
         return @[];
     }
-
-    NSError *foundationError=nil;
-    NSArray<NSString *> *foundationNames=[fm contentsOfDirectoryAtPath:root error:&foundationError];
-    NSMutableOrderedSet<NSString *> *names=[NSMutableOrderedSet orderedSet];
-    for (NSString *name in foundationNames ?: @[]) {
-        if ([[name.pathExtension lowercaseString] isEqualToString:@"json"]) [names addObject:name];
-    }
-
-    // Device fallback: if Foundation listing fails or unexpectedly sees zero
-    // JSON siblings, ask libc for the same exact directory (still non-recursive).
-    NSString *posixError=nil;
-    if (!foundationNames || names.count==0) ZNJICollectJSONNamesPOSIX(root,names,&posixError);
-
     NSMutableArray<NSString *> *found=[NSMutableArray array];
-    for (NSString *name in names) {
-        NSString *candidate=[root stringByAppendingPathComponent:name];
-        BOOL childDir=NO;
-        if (![fm fileExistsAtPath:candidate isDirectory:&childDir] || childDir) continue;
-        [found addObject:candidate];
+    for(NSString *name in names){
+        if(![[name.pathExtension lowercaseString] isEqualToString:@"json"])continue;
+        NSString *p=[root stringByAppendingPathComponent:name];
+        BOOL isDir=NO;
+        if([fm fileExistsAtPath:p isDirectory:&isDir]&&!isDir)[found addObject:p];
     }
-    [found sortUsingComparator:^NSComparisonResult(NSString *a,NSString *b){ return [a.lastPathComponent localizedStandardCompare:b.lastPathComponent]; }];
-
-    NSString *method=(foundationNames?@"Foundation":@"POSIX");
-    if (found.count) {
-        gZNJIDiscoveryStatus=[NSString stringWithFormat:@"与 1 同目录：发现 %lu 个 JSON · %@",(unsigned long)found.count,method];
-    } else {
-        NSMutableArray<NSString *> *parts=[NSMutableArray arrayWithObject:[NSString stringWithFormat:@"与 1 同目录未发现 JSON · %@",root]];
-        if (foundationError) [parts addObject:[NSString stringWithFormat:@"Foundation: %@",foundationError.localizedDescription?:@"未知错误"]];
-        if (posixError.length) [parts addObject:[NSString stringWithFormat:@"POSIX: %@",posixError]];
-        gZNJIDiscoveryStatus=[parts componentsJoinedByString:@" · "];
-    }
+    [found sortUsingSelector:@selector(localizedStandardCompare:)];
+    gZNJIDiscoveryStatus=[NSString stringWithFormat:@"Documents：发现 %lu 个 JSON",(unsigned long)found.count];
     return found;
 }
 
