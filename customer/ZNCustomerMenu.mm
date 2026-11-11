@@ -364,7 +364,10 @@
     if(tap.state==UIGestureRecognizerStateRecognized)[[ZNCustomerHost shared]toggle:(UIWindow *)tap.view];
 }
 @end
+extern "C" void ZNCustomerInstallReceiverLifecycle(void);
 __attribute__((constructor)) static void ZNCustomerInit(void) {
+    // Customer-only runtime receiver binding; developer bootstrap is not linked.
+    ZNCustomerInstallReceiverLifecycle();
     dispatch_async(dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter]addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){(void)n;[ZNCustomerBootstrap install];}];
         [ZNCustomerBootstrap install];

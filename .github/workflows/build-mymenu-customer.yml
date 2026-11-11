@@ -1,4 +1,4 @@
-name: Build mymenu Customer discovery stage
+name: Build mymenu Customer runtime
 on:
   push:
     branches:
@@ -24,7 +24,7 @@ jobs:
           brew install ldid
           git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
-      - name: Compile Customer discovery stage
+      - name: Compile Customer runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -32,10 +32,10 @@ jobs:
           make FINALPACKAGE=1 2>&1 | tee build.log
           test -s .theos/obj/MyMenuCustomer.dylib
           mkdir -p dist
-          cp .theos/obj/MyMenuCustomer.dylib dist/MyMenuCustomer_DISCOVERY_ONLY.dylib
-          ldid -S dist/MyMenuCustomer_DISCOVERY_ONLY.dylib
-          file dist/MyMenuCustomer_DISCOVERY_ONLY.dylib
-          shasum -a 256 dist/MyMenuCustomer_DISCOVERY_ONLY.dylib > dist/SHA256.txt
+          cp .theos/obj/MyMenuCustomer.dylib dist/MyMenuCustomer_RUNTIME_TEST.dylib
+          ldid -S dist/MyMenuCustomer_RUNTIME_TEST.dylib
+          file dist/MyMenuCustomer_RUNTIME_TEST.dylib
+          shasum -a 256 dist/MyMenuCustomer_RUNTIME_TEST.dylib > dist/SHA256.txt
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
@@ -43,11 +43,11 @@ jobs:
           name: mymenu-customer-build-log
           path: customer/build.log
           if-no-files-found: warn
-      - name: Upload discovery-only test dylib
+      - name: Upload Customer runtime test dylib
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: mymenu-customer-discovery-only-not-functional
+          name: mymenu-customer-runtime-multi-instance-test
           path: |
-            customer/dist/MyMenuCustomer_DISCOVERY_ONLY.dylib
+            customer/dist/MyMenuCustomer_RUNTIME_TEST.dylib
             customer/dist/SHA256.txt
