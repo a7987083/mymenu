@@ -276,8 +276,12 @@ static void *ZNM47InstanceForAction(ZNRuntimeMethodAction *action, NSString **di
                 return nil;
             }
             NSString *input=ZNM47Trim(text);
-            BOOL zeroOut=[input.lowercaseString isEqualToString:@"out"] ||
-                         (isOut && input.length==0);
+            BOOL explicitOut=[input.lowercaseString isEqualToString:@"out"];
+            if (explicitOut && !isOut) {
+                if (error) *error=@"FAILED_BYREF_DIRECTION：参数没有 out 元数据，禁止强制零初始化 ref";
+                return nil;
+            }
+            BOOL zeroOut=isOut && (explicitOut || input.length==0);
             byRefValues[i]=YES;
             if (!isValue) {
                 // A ref class needs a managed object, not an unboxed struct.
@@ -338,8 +342,9 @@ static void *ZNM47InstanceForAction(ZNRuntimeMethodAction *action, NSString **di
                 if (!ZNM47ParseDouble(text,&f64[i]) || !isfinite(f64[i])) { if(error)*error=@"FAILED_BYREF_VALUE：Double 输入无效"; return nil; }
                 params[i]=&f64[i];
             } else {
-                // Shared existing codec validates exact IL2CPP struct layout.
-                // It also handles registered encoders and explicit hex input.
+                // Shared marshaller validates the IL2CPP value-type size.
+                // JSON field input uses il2cpp_field_set_value on a boxed struct;
+                // registered encoders, op_Implicit and exact hex remain supported.
                 NSString *codecError=nil;
                 NSMutableData *payload=[ZNRuntimeArgumentMarshaller encodeValueTypeParameterForMethod:methodInfo
                                                                                                index:i

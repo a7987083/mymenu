@@ -3270,7 +3270,7 @@ static void ZN65StoreNumberText(NSDictionary *feature, NSString *text) {
             NSString *fallback=ZNValueTypeIsInteger(valueType)||valueType==ZNValueTypeAuto?[NSString stringWithFormat:@"%.0f",stored]:[NSString stringWithFormat:@"%.6g",stored];
             field.text=ZN65StoredText(feature,fallback);
             field.textAlignment=NSTextAlignmentCenter;
-            field.keyboardType=UIKeyboardTypeNumbersAndPunctuation;
+            field.keyboardType=[p[@"byRef"] boolValue]?UIKeyboardTypeDefault:UIKeyboardTypeNumbersAndPunctuation;
             field.returnKeyType=UIReturnKeyDone;
             field.textColor=self.theme.primaryTextColor;
             field.backgroundColor=[self.theme.controlColor colorWithAlphaComponent:.82];
@@ -13568,7 +13568,7 @@ static NSArray<NSString *> *ZNM613ArgumentValues(ZNRuntimeMenuControllerV040 *se
 }
 
 static NSString *ZNM613ParamAutoLabel(NSDictionary *param) {
-    if([param[@"byRef"] boolValue])return @"ByRef · value / out / null / hex:（按类型校验）";
+    if([param[@"byRef"] boolValue])return @"ByRef · fields / JSON / out / null / hex:（按类型校验）";
     NSString *type=[param[@"name"] isKindOfClass:NSString.class]?param[@"name"]:@"?";
     NSString *codec=ZNComplexStructCodecKeyForManagedType(type);
     if([codec isEqualToString:ZNComplexStructCodecObscuredInt])return @"ObscuredInt Codec · ARM64 indirect struct";
