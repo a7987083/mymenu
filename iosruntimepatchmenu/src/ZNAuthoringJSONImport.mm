@@ -3,7 +3,70 @@
 #import "ZNNativeHookAction.h"
 #import "ZNIL2CPPResolver.h"
 
+static NSDictionary *ZNPortableRuntimeRecord(ZNRuntimeMethodAction *a) {
+    return @{
+        @"title":a.title?:@"", @"description":a.featureDescription?:@"",
+        @"group":a.group?:@"Runtime Methods", @"executionKind":@(a.executionKind),
+        @"assembly":a.assembly?:@"Assembly-CSharp.dll",
+        @"namespace":a.namespaceName?:@"", @"class":a.className?:@"",
+        @"method":a.methodName?:@"", @"argumentCount":@(a.argumentCount),
+        @"parameterTypeNames":a.parameterTypeNames?:@[],
+        @"signatureAvailable":@(a.signatureAvailable),
+        @"argumentValues":a.argumentValues?:@[],
+        @"argumentControlConfigs":a.argumentControlConfigs?:@[],
+        @"immediateChain":a.immediateChain?:@{}
+    };
+}
+static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
+    return @{
+        @"actionID":@(a.actionID), @"title":a.title?:@"",
+        @"group":a.group?:@"Native Hooks", @"description":a.featureDescription?:@"",
+        @"assembly":a.assembly?:@"Assembly-CSharp.dll",
+        @"namespace":a.namespaceName?:@"", @"class":a.className?:@"",
+        @"method":a.methodName?:@"", @"argumentCount":@(a.argumentCount),
+        @"parameterTypeNames":a.parameterTypeNames?:@[],
+        @"signatureAvailable":@(a.signatureAvailable),
+        @"templateKind":@(a.templateKind), @"argumentIndex":@(a.argumentIndex),
+        @"min":@(a.minValue), @"max":@(a.maxValue), @"default":@(a.defaultValue),
+        @"callbackArgumentIndex":@(a.callbackArgumentIndex==NSNotFound?NSUIntegerMax:a.callbackArgumentIndex),
+        @"callbackValue":@(a.callbackValue), @"skipOriginal":@(a.skipOriginal),
+        @"returnBoolValue":@(a.returnBoolValue),
+        @"fieldArgumentIndex":@(a.fieldArgumentIndex==NSNotFound?NSUIntegerMax:a.fieldArgumentIndex),
+        @"fieldArgumentMode":a.fieldArgumentMode?:@"indirect-pointer",
+        @"fieldOffset":@(a.fieldOffset), @"fieldCodec":a.fieldCodec?:@"",
+        @"codecAssembly":a.codecAssembly?:@"", @"codecNamespace":a.codecNamespaceName?:@"",
+        @"codecClass":a.codecClassName?:@"", @"codecGetterMethod":a.codecGetterMethod?:@"",
+        @"codecSetterMethod":a.codecSetterMethod?:@"",
+        @"codecGetterArgumentCount":@(a.codecGetterArgumentCount),
+        @"codecSetterArgumentCount":@(a.codecSetterArgumentCount)
+    };
+}
+
 @implementation ZNAuthoringJSONImport
+
++ (NSData *)exportDataWithError:(NSString **)error {
+    NSArray<ZNRuntimeMethodAction *> *methods=[[ZNRuntimeActionStore sharedStore] actionsSnapshot];
+    NSArray<ZNNativeHookAction *> *hooks=[[ZNNativeHookStore sharedStore] actionsSnapshot];
+    if(!methods.count&&!hooks.count){
+        if(error)*error=@"没有可导出的 Runtime Method 或 Native Hook";
+        return nil;
+    }
+    if(methods.count>256||hooks.count>256){
+        if(error)*error=@"配置数量超过导入器的 256 条限制";
+        return nil;
+    }
+    NSMutableArray *runtime=[NSMutableArray arrayWithCapacity:methods.count];
+    NSMutableArray *native=[NSMutableArray arrayWithCapacity:hooks.count];
+    for(ZNRuntimeMethodAction *a in methods)[runtime addObject:ZNPortableRuntimeRecord(a)];
+    for(ZNNativeHookAction *a in hooks)[native addObject:ZNPortableNativeRecord(a)];
+    NSDictionary *root=@{@"format":@"zonoe-authoring",
+                          @"schemaVersion":@1,
+                          @"runtimeMethods":runtime, @"nativeHooks":native};
+    NSError *jsonError=nil;
+    NSData *data=[NSJSONSerialization dataWithJSONObject:root options:NSJSONWritingPrettyPrinted|NSJSONWritingSortedKeys error:&jsonError];
+    if(!data&&error)*error=jsonError.localizedDescription?:@"JSON 序列化失败";
+    return data;
+}
 
 + (BOOL)isAuthoringConfiguration:(id)root {
     return [root isKindOfClass:NSDictionary.class] &&
