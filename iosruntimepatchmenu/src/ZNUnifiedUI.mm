@@ -3681,9 +3681,9 @@ static NSMutableSet<NSString *> *ZN50BExpandedKeys(ZNRuntimeMenuControllerV040 *
     // remains Patch JSON-only; unified Runtime/Native configuration comes later.
     UIView *targetCard = [self cardAtY:y height:52 width:width compact:NO];
     CGFloat cardW=CGRectGetWidth(targetCard.bounds);
-    CGFloat margin=9.0, gap=6.0, actionW=57.0;
-    CGFloat pickerW=MAX(48.0,cardW-2*margin-2*actionW-2*gap);
-    UITextField *target=[self zn44_field:CGRectMake(margin,9,pickerW,32)
+    CGFloat toolbarMargin=9.0, toolbarGap=6.0, actionW=57.0;
+    CGFloat pickerW=MAX(48.0,cardW-2*toolbarMargin-2*actionW-2*toolbarGap);
+    UITextField *target=[self zn44_field:CGRectMake(toolbarMargin,9,pickerW,32)
                                       text:workspace.defaultTarget
                                placeholder:@"选择二进制"
                                        tag:440000
@@ -3691,18 +3691,18 @@ static NSMutableSet<NSString *> *ZN50BExpandedKeys(ZNRuntimeMenuControllerV040 *
     [targetCard addSubview:target];
     UIButton *import=[self zn40_button:(workspace.showJSONFiles ? @"收起" : @"导入")
                               selector:@selector(zn44_importJSON:)
-                                 frame:CGRectMake(margin+pickerW+gap,9,actionW,32)];
+                                 frame:CGRectMake(toolbarMargin+pickerW+toolbarGap,9,actionW,32)];
     import.enabled=!locked;
     import.accessibilityHint=@"当前导入功能仅支持原有 Patch JSON";
     [targetCard addSubview:import];
     // Display the planned export entry, but do not attach a no-op action.
-    UIButton *export=[self zn40_button:@"导出"
+    UIButton *exportButton=[self zn40_button:@"导出"
                               selector:NULL
-                                 frame:CGRectMake(margin+pickerW+gap+actionW+gap,9,actionW,32)];
-    export.enabled=NO;
-    export.alpha=0.45;
-    export.accessibilityHint=@"Runtime Method 和 Native Hook 配置导出将在下一阶段接入";
-    [targetCard addSubview:export];
+                                 frame:CGRectMake(toolbarMargin+pickerW+toolbarGap+actionW+toolbarGap,9,actionW,32)];
+    exportButton.enabled=NO;
+    exportButton.alpha=0.45;
+    exportButton.accessibilityHint=@"Runtime Method 和 Native Hook 配置导出将在下一阶段接入";
+    [targetCard addSubview:exportButton];
     [self.contentView addSubview:targetCard];
     y += 60;
 
