@@ -4,6 +4,8 @@
 #import <errno.h>
 #import <limits.h>
 #import <ctype.h>
+#import <float.h>
+#import <math.h>
 
 #import "ZNIL2CPPABIMetadata.h"
 #import "ZNRuntimeArgumentMarshaller.h"
