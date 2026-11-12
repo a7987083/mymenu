@@ -3,6 +3,7 @@
 #import "ZNNativeHookAction.h"
 #import "ZNIL2CPPResolver.h"
 #import "ZNIL2CPPMethodSignature.h"
+#import "ZNAuthoringRuntimeFeatureIdentity.h"
 
 static NSDictionary *ZNPortableRuntimeRecord(ZNRuntimeMethodAction *a) {
     return @{
@@ -119,13 +120,16 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
         if(error)*error=@"IL2CPP 尚未就绪，无法自动验证目标方法；未导入";
         return NO;
     }
-    // Full method signatures distinguish overloads of the same arity.
-    NSMutableSet<NSString *> *existingMethods=[NSMutableSet set];
-    for(ZNRuntimeMethodAction *a in [store actionsSnapshot])
-        [existingMethods addObject:a.canonicalIdentity?:@""];
+    // Full method signature locates the IL2CPP target, but is not a feature ID.
+    // A single method may back multiple independent item-ID/value actions.
+    NSMutableSet<NSDictionary *> *existingMethods=[NSMutableSet set];
+    for(ZNRuntimeMethodAction *action in [store actionsSnapshot])
+        [existingMethods addObject:ZNAuthoringRuntimeFeatureIdentity(
+            ZNPortableRuntimeRecord(action),action.canonicalIdentity)];
 
     // Preflight every record BEFORE adding anything. No silent partial import.
-    NSMutableSet<NSString *> *pendingMethods=[NSMutableSet set],*pendingHooks=[NSMutableSet set];
+    NSMutableSet<NSDictionary *> *pendingMethods=[NSMutableSet set];
+    NSMutableSet<NSString *> *pendingHooks=[NSMutableSet set];
     for(id obj in methods){
         if(![obj isKindOfClass:NSDictionary.class]){
             if(error)*error=@"Runtime Method 条目不是对象";
@@ -177,11 +181,14 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
         NSString *identity=([d[@"signatureAvailable"] boolValue]&&
             [claimedTypes isKindOfClass:NSArray.class]&&claimedTypes.count==(NSUInteger)argc.integerValue)?
             ZNIL2CPPFullMethodIdentity(assembly,ns,cls,method,claimedTypes):key;
-        if([existingMethods containsObject:identity] || [pendingMethods containsObject:identity]){
-            if(error)*error=[NSString stringWithFormat:@"Runtime 方法已存在或 JSON 重复：%@",key];
+        NSDictionary *featureIdentity=ZNAuthoringRuntimeFeatureIdentity(d,identity);
+        if([existingMethods containsObject:featureIdentity] ||
+           [pendingMethods containsObject:featureIdentity]){
+            if(error)*error=[NSString stringWithFormat:@"Runtime 功能配置已存在或 JSON 完全重复：%@ · %@",
+                             key,featureIdentity[@"title"]];
             return NO;
         }
-        [pendingMethods addObject:identity];
+        [pendingMethods addObject:featureIdentity];
         NSArray *types=d[@"parameterTypeNames"];
         if(![d[@"signatureAvailable"] boolValue]||![types isKindOfClass:NSArray.class]||
            types.count!=(NSUInteger)argc.integerValue){
