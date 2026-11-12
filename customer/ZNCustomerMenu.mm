@@ -31,6 +31,10 @@
 @interface ZNCustomerController : UIViewController
 @property(nonatomic,strong) UIStackView *rows;
 @property(nonatomic,strong) UIView *panel;
+@property(nonatomic,strong) UIView *toastView;
+@property(nonatomic,strong) UILabel *toastLabel;
+@property(nonatomic,strong) NSDictionary<NSString *, NSString *> *featureTitles;
+@property(nonatomic,assign) NSUInteger toastSequence;
 @property(nonatomic,strong) NSMutableDictionary<NSString *, NSString *> *numberDrafts;
 - (void)placePanelInBounds:(CGRect)bounds center:(CGPoint)center;
 @property(nonatomic,weak) UIViewController *gameOrientationController;
@@ -96,6 +100,34 @@
     stack.layoutMarginsRelativeArrangement=YES;
     stack.translatesAutoresizingMaskIntoConstraints=NO;
     [self.panel addSubview:stack];
+    // One reusable, non-interactive notification; never one view per feature.
+    UIView *toast=[UIView new];
+    toast.translatesAutoresizingMaskIntoConstraints=NO;
+    toast.layer.cornerRadius=10;
+    toast.clipsToBounds=YES;
+    toast.userInteractionEnabled=NO;
+    toast.hidden=YES;
+    UILabel *toastText=[UILabel new];
+    toastText.translatesAutoresizingMaskIntoConstraints=NO;
+    toastText.font=[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    toastText.textColor=UIColor.whiteColor;
+    toastText.textAlignment=NSTextAlignmentCenter;
+    toastText.numberOfLines=2;
+    toastText.lineBreakMode=NSLineBreakByTruncatingTail;
+    [toast addSubview:toastText];
+    [self.panel addSubview:toast];
+    [NSLayoutConstraint activateConstraints:@[
+        [toast.centerXAnchor constraintEqualToAnchor:self.panel.centerXAnchor],
+        [toast.bottomAnchor constraintEqualToAnchor:self.panel.bottomAnchor constant:-10],
+        [toast.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.panel.leadingAnchor constant:12],
+        [toast.trailingAnchor constraintLessThanOrEqualToAnchor:self.panel.trailingAnchor constant:-12],
+        [toastText.leadingAnchor constraintEqualToAnchor:toast.leadingAnchor constant:12],
+        [toastText.trailingAnchor constraintEqualToAnchor:toast.trailingAnchor constant:-12],
+        [toastText.topAnchor constraintEqualToAnchor:toast.topAnchor constant:8],
+        [toastText.bottomAnchor constraintEqualToAnchor:toast.bottomAnchor constant:-8]
+    ]];
+    self.toastView=toast;
+    self.toastLabel=toastText;
     [NSLayoutConstraint activateConstraints:@[
         [stack.leadingAnchor constraintEqualToAnchor:self.panel.leadingAnchor],
         [stack.trailingAnchor constraintEqualToAnchor:self.panel.trailingAnchor],
@@ -168,6 +200,11 @@
         [self.rows removeArrangedSubview:row]; [row removeFromSuperview];
     }
     NSArray<ZNCustomerItem *> *items=[[ZNCustomerAdapter shared] snapshot];
+    NSMutableDictionary<NSString *,NSString *> *titles=[NSMutableDictionary dictionaryWithCapacity:items.count];
+    for(ZNCustomerItem *item in items) {
+        if(item.identifier.length) titles[item.identifier]=item.title.length?item.title:@"未命名功能";
+    }
+    self.featureTitles=[titles copy];
     if(items.count==0){
         UILabel *empty=[UILabel new];
         empty.text=@"尚未接入客户端功能目录";
@@ -254,29 +291,58 @@
         [self.rows addArrangedSubview:line];
     }
 }
-- (void)error:(NSString *)description {
-    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"操作失败" message:description preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
+- (NSString *)featureTitle:(NSString *)identifier {
+    return self.featureTitles[identifier?:@""]?:@"当前功能";
+}
+- (void)dismissToast {
+    ++self.toastSequence; // Invalidate any outstanding delayed hide.
+    self.toastView.hidden=YES;
+}
+- (void)showToast:(NSString *)message success:(BOOL)success {
+    NSAssert(NSThread.isMainThread, @"Toast UI must be updated on main thread");
+    NSUInteger token=++self.toastSequence;
+    self.toastLabel.text=message;
+    self.toastView.backgroundColor=success?
+        [UIColor colorWithRed:.10 green:.39 blue:.28 alpha:.96]:
+        [UIColor colorWithRed:.49 green:.16 blue:.20 alpha:.96];
+    self.toastView.hidden=NO;
+    [self.panel bringSubviewToFront:self.toastView];
+    __weak typeof(self) weakSelf=self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.5*NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        ZNCustomerController *owner=weakSelf;
+        if(owner && owner.toastSequence==token)owner.toastView.hidden=YES;
+    });
+}
+- (void)reportResult:(BOOL)success identifier:(NSString *)identifier verb:(NSString *)verb error:(NSString *)error {
+    NSString *title=[self featureTitle:identifier];
+    if(success) {
+        [self showToast:[NSString stringWithFormat:@"%@功能%@成功",title,verb] success:YES];
+    } else {
+        NSString *reason=error.length?error:@"未知错误";
+        [self showToast:[NSString stringWithFormat:@"%@功能%@失败：%@",title,verb,reason] success:NO];
+    }
 }
 - (void)switchChanged:(UISwitch *)sender {
+    NSString *identifier=sender.accessibilityIdentifier?:@"";
+    BOOL enabled=sender.on;
     NSString *err=nil;
-    if(![[ZNCustomerAdapter shared]setEnabled:sender.on identifier:sender.accessibilityIdentifier?:@"" error:&err]){
-        sender.on=!sender.on;
-        [self error:err?:@"执行失败"];
-    }
+    BOOL success=[[ZNCustomerAdapter shared]setEnabled:enabled identifier:identifier error:&err];
+    if(!success)sender.on=!enabled;
+    [self reportResult:success identifier:identifier verb:enabled?@"开启":@"关闭" error:err];
 }
 - (void)executePressed:(UIButton *)sender {
+    NSString *identifier=sender.accessibilityIdentifier?:@"";
     NSString *err=nil;
-    if(![[ZNCustomerAdapter shared]execute:sender.accessibilityIdentifier?:@"" value:nil error:&err])
-        [self error:err?:@"执行失败"];
+    BOOL success=[[ZNCustomerAdapter shared]execute:identifier value:nil error:&err];
+    [self reportResult:success identifier:identifier verb:@"执行" error:err];
 }
 - (void)sliderChanged:(UISlider *)sender {
+    NSString *identifier=sender.accessibilityIdentifier?:@"";
     NSString *err=nil;
-    if(![[ZNCustomerAdapter shared]execute:sender.accessibilityIdentifier?:@"" value:@(sender.value) error:&err]){
-        [self error:err?:@"滑条执行失败"];
-        [self reload];
-    }
+    BOOL success=[[ZNCustomerAdapter shared]execute:identifier value:@(sender.value) error:&err];
+    [self reportResult:success identifier:identifier verb:@"执行" error:err];
+    if(!success)[self reload];
 }
 - (void)numberTextChanged:(UITextField *)field {
     if(field.accessibilityIdentifier.length)
@@ -291,18 +357,17 @@
     NSScanner *scanner=[NSScanner scannerWithString:raw];
     double number=0;
     if(!raw.length || ![scanner scanDouble:&number] || !scanner.isAtEnd || !std::isfinite(number)){
-        [self error:@"请输入有效的有限数值"];
+        [self reportResult:NO identifier:identifier verb:@"执行" error:@"请输入有效的有限数值"];
         return;
     }
     NSString *err=nil;
-    if(![[ZNCustomerAdapter shared] execute:identifier value:@(number) error:&err]){
-        [self error:err?:@"数值执行失败"];
-        return;
-    }
+    BOOL success=[[ZNCustomerAdapter shared] execute:identifier value:@(number) error:&err];
+    [self reportResult:success identifier:identifier verb:@"执行" error:err];
+    if(!success)return;
     [self.view endEditing:YES];
     [self reload];
 }
-- (void)closePressed { if(self.onClose)self.onClose(); }
+- (void)closePressed { [self dismissToast]; if(self.onClose)self.onClose(); }
 - (void)drag:(UIPanGestureRecognizer *)gesture {
     if(gesture.state!=UIGestureRecognizerStateBegan && gesture.state!=UIGestureRecognizerStateChanged)return;
     // A stationary root is the coordinate space; never move the UIWindow.
@@ -330,7 +395,7 @@
 + (instancetype)shared {static ZNCustomerHost *s;static dispatch_once_t once;dispatch_once(&once,^{s=[ZNCustomerHost new];});return s;}
 - (void)toggle:(UIWindow *)host {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self toggle:host];});return;}
-    if(self.window&&!self.window.hidden){self.window.hidden=YES;return;}
+    if(self.window&&!self.window.hidden){[self.controller dismissToast];self.window.hidden=YES;return;}
     if(!host||host.hidden||host.windowLevel!=UIWindowLevelNormal)return;
     if(self.window&&self.window.windowScene!=host.windowScene){
         self.window.hidden=YES;self.window.rootViewController=nil;self.window=nil;self.controller=nil;self.moved=NO;
