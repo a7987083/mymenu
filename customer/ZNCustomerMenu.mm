@@ -6,31 +6,26 @@
 @interface ZNCustomerWindow : UIWindow
 @end
 @implementation ZNCustomerWindow
-// Keep the game key window intact. Other overlays may attach to keyWindow.
-- (BOOL)canBecomeKeyWindow { return NO; }
+// The overlay must be eligible to become key only while editing a text field.
+// It is explicitly returned to the game window when editing ends.
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     if(![super pointInside:point withEvent:event]) return NO;
     UIView *root=self.rootViewController.view;
     if(!root)return NO;
     UIView *panel=[root viewWithTag:0x5A4E];
-    if(panel && !panel.hidden && panel.alpha>0.01 && panel.userInteractionEnabled) {
-        CGPoint local=[self convertPoint:point toView:panel];
-        if([panel pointInside:local withEvent:event])return YES;
-    }
-    // Do not intercept transparent scene areas. Preserve any sibling overlays
-    // attached by other code without incorporating them into panel dragging.
-    for(UIView *sibling in self.subviews) {
-        if(sibling==root || sibling.hidden || sibling.alpha<=0.01 || !sibling.userInteractionEnabled)continue;
-        CGPoint local=[self convertPoint:point toView:sibling];
-        if([sibling hitTest:local withEvent:event])return YES;
-    }
-    return NO;
+    if(!panel || panel.hidden || panel.alpha<=0.01 || !panel.userInteractionEnabled)return NO;
+    CGPoint local=[self convertPoint:point toView:panel];
+    // Hit-test only our own menu. UIWindow UIKit wrapper views are not
+    // evidence of a real overlay control and may otherwise swallow game touches.
+    return [[UIBezierPath bezierPathWithRoundedRect:panel.bounds cornerRadius:14]
+            containsPoint:local];
 }
 @end
 
-@interface ZNCustomerController : UIViewController
+@interface ZNCustomerController : UIViewController <UITextFieldDelegate>
 @property(nonatomic,strong) UIStackView *rows;
 @property(nonatomic,strong) UIView *panel;
+@property(nonatomic,weak) UIWindow *gameWindow;
 @property(nonatomic,strong) UIView *toastView;
 @property(nonatomic,strong) UILabel *toastLabel;
 @property(nonatomic,strong) NSDictionary<NSString *, NSString *> *featureTitles;
@@ -255,6 +250,7 @@
             inputColumn.axis=UILayoutConstraintAxisVertical;
             inputColumn.spacing=2;
             UITextField *field=[UITextField new];
+            field.delegate=self;
             field.accessibilityIdentifier=identifier;
             field.text=self.numberDrafts[identifier];
             field.placeholder=@"数量";
@@ -345,6 +341,19 @@
     [self reportResult:success identifier:identifier verb:@"执行" error:err];
     if(!success)[self reload];
 }
+- (BOOL)textFieldShouldBeginEditing:(UITextField *)field {
+    (void)field;
+    // UIKit requires a key window for keyboard presentation. Switch only
+    // on explicit input focus, not when merely showing the floating menu.
+    UIWindow *overlay=self.view.window;
+    if(overlay && !overlay.isKeyWindow)[overlay makeKeyWindow];
+    return YES;
+}
+- (void)textFieldDidEndEditing:(UITextField *)field {
+    (void)field;
+    UIWindow *game=self.gameWindow;
+    if(game && !game.hidden && self.view.window.isKeyWindow)[game makeKeyWindow];
+}
 - (void)numberTextChanged:(UITextField *)field {
     if(field.accessibilityIdentifier.length)
         self.numberDrafts[field.accessibilityIdentifier]=field.text?:@"";
@@ -368,7 +377,7 @@
     [self.view endEditing:YES];
     [self reload];
 }
-- (void)closePressed { [self dismissToast]; if(self.onClose)self.onClose(); }
+- (void)closePressed { if(self.onClose)self.onClose(); }
 - (void)drag:(UIPanGestureRecognizer *)gesture {
     if(gesture.state!=UIGestureRecognizerStateBegan && gesture.state!=UIGestureRecognizerStateChanged)return;
     // A stationary root is the coordinate space; never move the UIWindow.
@@ -391,18 +400,27 @@
 @property(nonatomic,assign) BOOL moved;
 + (instancetype)shared;
 - (void)toggle:(UIWindow *)host;
+- (void)hideMenu;
 @end
 @implementation ZNCustomerHost
 + (instancetype)shared {static ZNCustomerHost *s;static dispatch_once_t once;dispatch_once(&once,^{s=[ZNCustomerHost new];});return s;}
+- (void)hideMenu {
+    [self.controller.view endEditing:YES];
+    [self.controller dismissToast];
+    self.window.hidden=YES;
+    UIWindow *game=self.source;
+    if(game && !game.hidden && self.window.isKeyWindow)[game makeKeyWindow];
+}
 - (void)toggle:(UIWindow *)host {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self toggle:host];});return;}
-    if(self.window&&!self.window.hidden){[self.controller dismissToast];self.window.hidden=YES;return;}
+    if(self.window&&!self.window.hidden){[self hideMenu];return;}
     if(!host||host.hidden||host.windowLevel!=UIWindowLevelNormal)return;
     if(self.window&&self.window.windowScene!=host.windowScene){
         self.window.hidden=YES;self.window.rootViewController=nil;self.window=nil;self.controller=nil;self.moved=NO;
     }
     self.source=host;
     if(self.controller) {
+        self.controller.gameWindow=host;
         self.controller.gameOrientationController=host.rootViewController;
         if(@available(iOS 16.0,*))
             [self.controller setNeedsUpdateOfSupportedInterfaceOrientations];
@@ -414,9 +432,10 @@
         w.windowLevel=UIWindowLevelAlert-1;
         w.backgroundColor=UIColor.clearColor;
         self.controller=[ZNCustomerController new];
+        self.controller.gameWindow=host;
         self.controller.gameOrientationController=host.rootViewController;
         __weak ZNCustomerHost *weakSelf=self;
-        self.controller.onClose=^{weakSelf.window.hidden=YES;};
+        self.controller.onClose=^{[weakSelf hideMenu];};
         self.controller.onMove=^{
             ZNCustomerHost *owner=weakSelf;
             if(!owner)return;
@@ -439,6 +458,8 @@
                                 center:CGPointMake(cx,cy)];
     [self.controller reload];
     self.window.hidden=NO;
+    // Showing a utility window must not steal the game's key status.
+    if(!host.isKeyWindow)[host makeKeyWindow];
 }
 @end
 
