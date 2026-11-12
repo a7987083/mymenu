@@ -307,7 +307,7 @@
         [UIColor colorWithRed:.49 green:.16 blue:.20 alpha:.96];
     self.toastView.hidden=NO;
     [self.panel bringSubviewToFront:self.toastView];
-    __weak typeof(self) weakSelf=self;
+    __weak ZNCustomerController *weakSelf=self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(1.5*NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         ZNCustomerController *owner=weakSelf;
@@ -316,11 +316,12 @@
 }
 - (void)reportResult:(BOOL)success identifier:(NSString *)identifier verb:(NSString *)verb error:(NSString *)error {
     NSString *title=[self featureTitle:identifier];
+    NSString *functionName=[title hasSuffix:@"功能"]?title:[title stringByAppendingString:@"功能"];
     if(success) {
-        [self showToast:[NSString stringWithFormat:@"%@功能%@成功",title,verb] success:YES];
+        [self showToast:[NSString stringWithFormat:@"%@%@成功",functionName,verb] success:YES];
     } else {
         NSString *reason=error.length?error:@"未知错误";
-        [self showToast:[NSString stringWithFormat:@"%@功能%@失败：%@",title,verb,reason] success:NO];
+        [self showToast:[NSString stringWithFormat:@"%@%@失败：%@",functionName,verb,reason] success:NO];
     }
 }
 - (void)switchChanged:(UISwitch *)sender {
