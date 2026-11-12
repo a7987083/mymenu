@@ -31,6 +31,8 @@ jobs:
           cd customer
           make FINALPACKAGE=1 2>&1 | tee build.log
           test -s .theos/obj/MyMenuCustomer.dylib
+          # Reject shipping the original M4.3-only client by checking the M4.7 layer.
+          nm -a .theos/obj/MyMenuCustomer.dylib | grep -q 'ZNInstallM47MultiArgInvokeDeferred'
           mkdir -p dist
           cp .theos/obj/MyMenuCustomer.dylib dist/MyMenuCustomer_RUNTIME_TEST.dylib
           ldid -S dist/MyMenuCustomer_RUNTIME_TEST.dylib

@@ -365,9 +365,12 @@
 }
 @end
 extern "C" void ZNCustomerInstallReceiverLifecycle(void);
+extern "C" void ZNInstallM47MultiArgInvokeDeferred(void);
 __attribute__((constructor)) static void ZNCustomerInit(void) {
     // Customer-only runtime receiver binding; developer bootstrap is not linked.
     ZNCustomerInstallReceiverLifecycle();
+    // Client Runtime Method actions use the same /2-/8 engine as developer authoring.
+    ZNInstallM47MultiArgInvokeDeferred();
     dispatch_async(dispatch_get_main_queue(), ^{
         [[NSNotificationCenter defaultCenter]addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){(void)n;[ZNCustomerBootstrap install];}];
         [ZNCustomerBootstrap install];
