@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <stdlib.h>
 #import "../src/ZNAuthoringRuntimeFeatureIdentity.h"
 
 static NSDictionary *Record(NSString *itemID, NSString *title) {

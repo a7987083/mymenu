@@ -31,9 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          clang -fobjc-arc -framework Foundation -x objective-c \\
-            iosruntimepatchmenu/tests/authoring_runtime_feature_identity_test.m \\
-            -o /tmp/authoring_runtime_feature_identity_test
+          clang -fobjc-arc -framework Foundation -x objective-c iosruntimepatchmenu/tests/authoring_runtime_feature_identity_test.m -o /tmp/authoring_runtime_feature_identity_test
           /tmp/authoring_runtime_feature_identity_test
 
       - name: Install build dependencies
