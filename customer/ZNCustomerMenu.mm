@@ -6,15 +6,33 @@
 @interface ZNCustomerWindow : UIWindow
 @end
 @implementation ZNCustomerWindow
+// Keep the game key window intact. Other overlays may attach to keyWindow.
+- (BOOL)canBecomeKeyWindow { return NO; }
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     if(![super pointInside:point withEvent:event]) return NO;
-    return [[UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:14] containsPoint:point];
+    UIView *root=self.rootViewController.view;
+    if(!root)return NO;
+    UIView *panel=[root viewWithTag:0x5A4E];
+    if(panel && !panel.hidden && panel.alpha>0.01 && panel.userInteractionEnabled) {
+        CGPoint local=[self convertPoint:point toView:panel];
+        if([panel pointInside:local withEvent:event])return YES;
+    }
+    // Do not intercept transparent scene areas. Preserve any sibling overlays
+    // attached by other code without incorporating them into panel dragging.
+    for(UIView *sibling in self.subviews) {
+        if(sibling==root || sibling.hidden || sibling.alpha<=0.01 || !sibling.userInteractionEnabled)continue;
+        CGPoint local=[self convertPoint:point toView:sibling];
+        if([sibling hitTest:local withEvent:event])return YES;
+    }
+    return NO;
 }
 @end
 
 @interface ZNCustomerController : UIViewController
 @property(nonatomic,strong) UIStackView *rows;
+@property(nonatomic,strong) UIView *panel;
 @property(nonatomic,strong) NSMutableDictionary<NSString *, NSString *> *numberDrafts;
+- (void)placePanelInBounds:(CGRect)bounds center:(CGPoint)center;
 @property(nonatomic,weak) UIViewController *gameOrientationController;
 @property(nonatomic,copy) void (^onClose)(void);
 @property(nonatomic,copy) void (^onMove)(void);
@@ -36,11 +54,24 @@
         [super preferredInterfaceOrientationForPresentation];
 }
 - (void)loadView {
-    UIView *view=[UIView new];
-    view.backgroundColor=[UIColor colorWithRed:.035 green:.045 blue:.12 alpha:.96];
-    view.layer.cornerRadius=14;
-    view.layer.masksToBounds=YES;
-    self.view=view;
+    UIView *root=[UIView new];
+    root.backgroundColor=UIColor.clearColor;
+    self.view=root;
+    UIView *panel=[UIView new];
+    panel.tag=0x5A4E;
+    panel.backgroundColor=[UIColor colorWithRed:.035 green:.045 blue:.12 alpha:.96];
+    panel.layer.cornerRadius=14;
+    panel.layer.masksToBounds=YES;
+    [root addSubview:panel];
+    self.panel=panel;
+}
+- (void)placePanelInBounds:(CGRect)bounds center:(CGPoint)center {
+    CGFloat width=fmin(300,fmax(120,bounds.size.width-28));
+    CGFloat height=fmin(260,fmax(60,bounds.size.height-16));
+    CGFloat x=fmax(8,fmin(center.x-width/2,CGRectGetMaxX(bounds)-width-8));
+    CGFloat y=fmax(8,fmin(center.y-height/2,CGRectGetMaxY(bounds)-height-8));
+    self.panel.frame=CGRectMake(x,y,width,height);
+    [self.panel setNeedsLayout];
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -51,25 +82,25 @@
                     (id)[UIColor colorWithRed:.65 green:.21 blue:1 alpha:1].CGColor];
     stroke.startPoint=CGPointMake(0,0);
     stroke.endPoint=CGPointMake(1,1);
-    stroke.frame=self.view.bounds;
+    stroke.frame=self.panel.bounds;
     CAShapeLayer *mask=[CAShapeLayer layer];
     mask.fillColor=UIColor.clearColor.CGColor;
     mask.strokeColor=UIColor.whiteColor.CGColor;
     mask.lineWidth=2.5;
     stroke.mask=mask;
-    [self.view.layer addSublayer:stroke];
+    [self.panel.layer addSublayer:stroke];
     UIStackView *stack=[UIStackView new];
     stack.axis=UILayoutConstraintAxisVertical;
     stack.spacing=0;
     stack.layoutMargins=UIEdgeInsetsMake(8,10,8,10);
     stack.layoutMarginsRelativeArrangement=YES;
     stack.translatesAutoresizingMaskIntoConstraints=NO;
-    [self.view addSubview:stack];
+    [self.panel addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
-        [stack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [stack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
-        [stack.topAnchor constraintEqualToAnchor:self.view.topAnchor],
-        [stack.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]
+        [stack.leadingAnchor constraintEqualToAnchor:self.panel.leadingAnchor],
+        [stack.trailingAnchor constraintEqualToAnchor:self.panel.trailingAnchor],
+        [stack.topAnchor constraintEqualToAnchor:self.panel.topAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:self.panel.bottomAnchor]
     ]];
     UIStackView *header=[UIStackView new];
     header.axis=UILayoutConstraintAxisHorizontal;
@@ -112,15 +143,25 @@
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    CAGradientLayer *gradient=(CAGradientLayer *)self.view.layer.sublayers.firstObject;
+    CAGradientLayer *gradient=(CAGradientLayer *)self.panel.layer.sublayers.firstObject;
     if(![gradient isKindOfClass:CAGradientLayer.class]) return;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    gradient.frame=self.view.bounds;
+    gradient.frame=self.panel.bounds;
     CAShapeLayer *mask=(CAShapeLayer *)gradient.mask;
     mask.frame=gradient.bounds;
     mask.path=[UIBezierPath bezierPathWithRoundedRect:CGRectInset(gradient.bounds,1.5,1.5) cornerRadius:13].CGPath;
     [CATransaction commit];
+    // After rotation/scene resizing, keep the panel within the stationary
+    // root and preserve its relative center without moving sibling windows.
+    CGRect bounds=self.view.bounds,frame=self.panel.frame;
+    if(bounds.size.width>0 && bounds.size.height>0 && frame.size.width>0 &&
+       (CGRectGetMaxX(frame)>CGRectGetMaxX(bounds)-8 ||
+        CGRectGetMaxY(frame)>CGRectGetMaxY(bounds)-8 ||
+        CGRectGetMinX(frame)<8 || CGRectGetMinY(frame)<8)) {
+        [self placePanelInBounds:bounds center:CGPointMake(CGRectGetMidX(frame),CGRectGetMidY(frame))];
+        if(self.onMove)self.onMove();
+    }
 }
 - (void)reload {
     for(UIView *row in [self.rows.arrangedSubviews copy]) {
@@ -264,16 +305,14 @@
 - (void)closePressed { if(self.onClose)self.onClose(); }
 - (void)drag:(UIPanGestureRecognizer *)gesture {
     if(gesture.state!=UIGestureRecognizerStateBegan && gesture.state!=UIGestureRecognizerStateChanged)return;
-    UIWindow *window=self.view.window;
-    if(!window)return;
+    // A stationary root is the coordinate space; never move the UIWindow.
     CGPoint delta=[gesture translationInView:self.view];
     [gesture setTranslation:CGPointZero inView:self.view];
-    CGRect bounds=UIScreen.mainScreen.bounds;
-    if(@available(iOS 13.0,*)){if(window.windowScene)bounds=window.windowScene.coordinateSpace.bounds;}
-    CGRect frame=window.frame;
+    CGRect bounds=self.view.bounds;
+    CGRect frame=self.panel.frame;
     frame.origin.x=fmax(CGRectGetMinX(bounds)+8,fmin(frame.origin.x+delta.x,CGRectGetMaxX(bounds)-frame.size.width-8));
     frame.origin.y=fmax(CGRectGetMinY(bounds)+8,fmin(frame.origin.y+delta.y,CGRectGetMaxY(bounds)-frame.size.height-8));
-    window.frame=frame;
+    self.panel.frame=frame;
     if(self.onMove)self.onMove();
 }
 @end
@@ -315,7 +354,7 @@
         self.controller.onMove=^{
             ZNCustomerHost *owner=weakSelf;
             if(!owner)return;
-            CGRect bounds=owner.source.bounds,frame=owner.window.frame;
+            CGRect bounds=owner.controller.view.bounds,frame=owner.controller.panel.frame;
             if(bounds.size.width<=0||bounds.size.height<=0)return;
             owner.normalizedCenter=CGPointMake(CGRectGetMidX(frame)/bounds.size.width,CGRectGetMidY(frame)/bounds.size.height);
             owner.moved=YES;
@@ -324,12 +363,14 @@
         self.window=w;
     }
     CGRect bounds=host.bounds;
-    CGFloat width=fmin(300,fmax(120,bounds.size.width-28));
-    CGFloat height=fmin(260,fmax(60,bounds.size.height-16));
+    if(@available(iOS 13.0,*)){if(host.windowScene)bounds=host.windowScene.coordinateSpace.bounds;}
+    // This frame is set only on opening/scene change, not during dragging.
+    self.window.frame=bounds;
+    [self.controller loadViewIfNeeded];
     CGFloat cx=self.moved?self.normalizedCenter.x*bounds.size.width:CGRectGetMidX(bounds);
     CGFloat cy=self.moved?self.normalizedCenter.y*bounds.size.height:CGRectGetMidY(bounds);
-    self.window.frame=CGRectMake(fmax(8,fmin(cx-width/2,bounds.size.width-width-8)),
-                                 fmax(8,fmin(cy-height/2,bounds.size.height-height-8)),width,height);
+    [self.controller placePanelInBounds:CGRectMake(0,0,bounds.size.width,bounds.size.height)
+                                center:CGPointMake(cx,cy)];
     [self.controller reload];
     self.window.hidden=NO;
 }
