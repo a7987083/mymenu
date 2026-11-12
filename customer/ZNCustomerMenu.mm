@@ -407,9 +407,10 @@
 - (void)hideMenu {
     [self.controller.view endEditing:YES];
     [self.controller dismissToast];
-    self.window.hidden=YES;
     UIWindow *game=self.source;
+    // Restore input focus before hiding the overlay; hiding clears isKeyWindow.
     if(game && !game.hidden && self.window.isKeyWindow)[game makeKeyWindow];
+    self.window.hidden=YES;
 }
 - (void)toggle:(UIWindow *)host {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{[self toggle:host];});return;}
