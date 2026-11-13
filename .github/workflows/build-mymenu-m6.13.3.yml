@@ -40,9 +40,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 iosruntimepatchmenu/scripts/generate_dictionary.py --check
-          clang++ -fobjc-arc -std=c++17 -framework Foundation \\
-            iosruntimepatchmenu/src/ZNMethodTranslator.mm \\
-            iosruntimepatchmenu/tests/method_translator_test.mm \\
+          clang++ -fobjc-arc -std=c++17 -framework Foundation \
+            iosruntimepatchmenu/src/ZNMethodTranslator.mm \
+            iosruntimepatchmenu/tests/method_translator_test.mm \
             -o /tmp/mymenu_method_translator_test
           /tmp/mymenu_method_translator_test
 
