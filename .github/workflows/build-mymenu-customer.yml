@@ -4,6 +4,7 @@ on:
     branches:
       - customer/m6.13-client
       - customer/clean-runtime-rewrite
+      - fix/customer-direct-native-call
     paths:
       - 'customer/**'
       - 'iosruntimepatchmenu/src/**'
