@@ -12082,6 +12082,8 @@ static const void *kZNM54HistoryKey = &kZNM54HistoryKey;
 - (void)znm54_queryChanged:(UITextField *)field;
 - (void)znm54_limitChanged:(UITextField *)field;
 - (void)znm54_submitSearch:(id)sender;
+- (void)znm54_dispatchMethodSearch:(id)sender;
+- (void)znm54_addMethodQueryRowToCard:(UIView *)card;
 - (void)znm54_historyTapped:(UIButton *)sender;
 - (void)znm54_filterTapped:(UIButton *)sender;
 - (void)znm54_argumentChanged:(UITextField *)field;
@@ -12346,9 +12348,17 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     if (raw > 0) [self zn60v3_setLimit:(NSUInteger)MAX(1, MIN(1024, raw))];
 }
 
+// Stable UI entry: keyboard Search and the visible button share one path.
+// Future Class search dispatch belongs here, not in another renderer swizzle.
 - (void)znm54_submitSearch:(id)sender {
     [self.hostWindow endEditing:YES];
     ZNM54RecordHistory([self zn57mf_query]);
+    [self znm54_dispatchMethodSearch:sender];
+}
+
+- (void)znm54_dispatchMethodSearch:(id)sender {
+    // Preserve the established M4.4.2 query normalization, Assembly choice,
+    // RVA handling, and downstream result/detail behavior without duplication.
     [self znm442_submitSearch:sender];
 }
 
@@ -12363,14 +12373,9 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     }
 }
 
-- (void)znm54_renderSearchAtWidth:(CGFloat)width {
-    [self znm65_stopLiveHookStatusTimer];
-    CGFloat y = 9.0;
-    UIView *card = [self cardAtY:y height:170.0 width:width compact:NO];
-    UILabel *title = [self label:@"IL2CPP 方法查找 · Unified" size:12.6 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
-    title.frame = CGRectMake(13, 8, card.bounds.size.width - 26, 20);
-    [card addSubview:title];
-
+// Own the search row in one place: changing the label to a mode toggle
+// later must not change query, limit, Assembly, or legacy method search state.
+- (void)znm54_addMethodQueryRowToCard:(UIView *)card {
     UILabel *methodLabel = [self label:@"方法名" size:8.8 weight:UIFontWeightSemibold color:self.theme.secondaryTextColor];
     methodLabel.frame = CGRectMake(13, 35, 55, 34);
     [card addSubview:methodLabel];
@@ -12384,11 +12389,22 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     [query addTarget:self action:@selector(znm54_queryChanged:) forControlEvents:UIControlEventEditingChanged];
     [query addTarget:self action:@selector(znm54_submitSearch:) forControlEvents:UIControlEventEditingDidEndOnExit];
     [card addSubview:query];
-
+    
     UIButton *search = [self zn40_button:@"搜索" selector:@selector(znm54_submitSearch:) frame:CGRectMake(CGRectGetMaxX(query.frame) + 7, 34, buttonW, 36)];
     search.backgroundColor = [self.theme.accentColor colorWithAlphaComponent:0.20];
     search.layer.borderColor = self.theme.accentColor.CGColor;
     [card addSubview:search];
+}
+
+- (void)znm54_renderSearchAtWidth:(CGFloat)width {
+    [self znm65_stopLiveHookStatusTimer];
+    CGFloat y = 9.0;
+    UIView *card = [self cardAtY:y height:170.0 width:width compact:NO];
+    UILabel *title = [self label:@"IL2CPP 方法查找 · Unified" size:12.6 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
+    title.frame = CGRectMake(13, 8, card.bounds.size.width - 26, 20);
+    [card addSubview:title];
+
+    [self znm54_addMethodQueryRowToCard:card];
 
     UILabel *assemblyLabel = [self label:@"Assembly" size:8.8 weight:UIFontWeightSemibold color:self.theme.secondaryTextColor];
     assemblyLabel.frame = CGRectMake(13, 79, 55, 32);
