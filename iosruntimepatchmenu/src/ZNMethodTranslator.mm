@@ -106,6 +106,13 @@ static NSString *ZNMP4Phrase(NSArray<NSString *> *tokens,NSDictionary<NSString *
     if(cached)return [cached isEqualToString:@"<untranslated>"]?nil:cached;
     NSDictionary *dictionary=ZNMP4Dictionary();
     NSArray<NSString *> *chunks=ZNMP4LexicalChunks(methodName);
+    // Explicit full-name glosses override constituent word meanings.
+    NSString *normalized=[chunks componentsJoinedByString:@""];
+    NSString *exact=dictionary[normalized];
+    if(exact.length){
+        [cache setObject:exact forKey:methodName];
+        return exact;
+    }
     NSMutableArray<NSString *> *tokens=[NSMutableArray array];
     for(NSString *chunk in chunks) {
         NSArray *parts=ZNMP4Segment(chunk,dictionary);
