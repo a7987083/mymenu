@@ -12074,6 +12074,24 @@ static const void *kZNM54CandidateKey = &kZNM54CandidateKey;
 static const void *kZNM54StoreKey = &kZNM54StoreKey;
 static const void *kZNM54FilterKey = &kZNM54FilterKey;
 static const void *kZNM54HistoryKey = &kZNM54HistoryKey;
+static const void *kZNM64ClassModeKey=&kZNM64ClassModeKey;
+static const void *kZNM64ClassResultsKey=&kZNM64ClassResultsKey;
+static const void *kZNM64SelectedClassKey=&kZNM64SelectedClassKey;
+static const void *kZNM64SearchTokenKey=&kZNM64SearchTokenKey;
+static NSString *const kZNM64ClassHistoryKey=@"zonoe.m6.14.class-history.v1";
+static BOOL ZNM64IsClassMode(id owner){return [objc_getAssociatedObject(owner,kZNM64ClassModeKey) boolValue];}
+static NSArray<NSString *> *ZNM64ClassHistory(void){
+    id value=[NSUserDefaults.standardUserDefaults objectForKey:kZNM64ClassHistoryKey];
+    return [value isKindOfClass:NSArray.class]?value:@[];
+}
+static void ZNM64SaveClassHistory(NSString *query){
+    NSString *value=[query stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if(!value.length)return;
+    NSMutableArray *items=[ZNM64ClassHistory() mutableCopy];
+    [items removeObject:value];[items insertObject:value atIndex:0];
+    if(items.count>50)[items removeObjectsInRange:NSMakeRange(50,items.count-50)];
+    [NSUserDefaults.standardUserDefaults setObject:items forKey:kZNM64ClassHistoryKey];
+}
 
 @interface ZNRuntimeMenuControllerV040 (ZNMethodFinderUnifiedUI)
 - (void)znm54_renderSearchAtWidth:(CGFloat)width;
@@ -12083,6 +12101,11 @@ static const void *kZNM54HistoryKey = &kZNM54HistoryKey;
 - (void)znm54_limitChanged:(UITextField *)field;
 - (void)znm54_submitSearch:(id)sender;
 - (void)znm54_dispatchMethodSearch:(id)sender;
+- (void)znm64_toggleMode:(id)sender;
+- (void)znm64_cancelSearch:(id)sender;
+- (void)znm64_selectClass:(UIButton *)sender;
+- (void)znm64_backToClasses:(id)sender;
+- (void)znm64_renderClassResultsAtWidth:(CGFloat)width;
 - (void)znm54_addMethodQueryRowToCard:(UIView *)card;
 - (void)znm54_historyTapped:(UIButton *)sender;
 - (void)znm54_filterTapped:(UIButton *)sender;
@@ -12352,6 +12375,39 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
 // Future Class search dispatch belongs here, not in another renderer swizzle.
 - (void)znm54_submitSearch:(id)sender {
     [self.hostWindow endEditing:YES];
+    if(ZNM64IsClassMode(self)){
+        NSString *query=ZNM54Trim([self zn57mf_query]);
+        if(!query.length){[self zn60v3_setStatus:@"请输入类名"];[self renderPage];return;}
+        ZNM64SaveClassHistory(query);
+        NSString *token=NSUUID.UUID.UUIDString;
+        objc_setAssociatedObject(self,kZNM64SearchTokenKey,token,OBJC_ASSOCIATION_COPY_NONATOMIC);
+        objc_setAssociatedObject(self,kZNM64SelectedClassKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        NSString *assembly=[self znm43_selectedAssembly]?:@"";
+        NSUInteger limit=[self zn60v3_limit];
+        [self zn60v3_setStatus:@"正在查找类名…"];
+        [self zn60v3_setPage:0];[self renderPage];
+        __weak ZNRuntimeMenuControllerV040 *weakSelf=self;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
+            BOOL (^cancel)(void)=^BOOL{
+                ZNRuntimeMenuControllerV040 *owner=weakSelf;
+                return !owner||![objc_getAssociatedObject(owner,kZNM64SearchTokenKey) isEqual:token];
+            };
+            NSString *error=nil;
+            NSArray *results=[[ZNIL2CPPHybridFinder sharedFinder] zn64_searchClasses:query assembly:assembly limit:limit cancel:cancel error:&error];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                ZNRuntimeMenuControllerV040 *owner=weakSelf;
+                if(!owner||cancel())return;
+                objc_setAssociatedObject(owner,kZNM64SearchTokenKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                objc_setAssociatedObject(owner,kZNM64ClassResultsKey,results?:@[],OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                BOOL truncated=[results.firstObject[@"truncated"] boolValue];
+                [owner zn60v3_setStatus:results.count
+                    ? [NSString stringWithFormat:@"匹配 %lu 个类%@",(unsigned long)results.count,truncated?@" · 结果可能不完整":@""]
+                    : (error?:@"没有匹配的类")];
+                [owner zn60v3_setPage:results.count?1:0];[owner renderPage];
+            });
+        });
+        return;
+    }
     ZNM54RecordHistory([self zn57mf_query]);
     [self znm54_dispatchMethodSearch:sender];
 }
