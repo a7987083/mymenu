@@ -4,9 +4,75 @@
 #include <cmath>
 #import "../iosruntimepatchmenu/src/ZNStaticDispatchRuntime.h"
 #import "../iosruntimepatchmenu/src/ZNRuntimeActionRuntime.h"
+#import "../iosruntimepatchmenu/src/ZNRuntimeActionFormat.h"
+#import "../iosruntimepatchmenu/src/ZNDirectNativeCallEngine.h"
+#import "../iosruntimepatchmenu/src/ZNIL2CPPHybridFinder.h"
+#import "../iosruntimepatchmenu/src/ZNIL2CPPMethodSignature.h"
 
 @implementation ZNCustomerItem
 @end
+
+// Do not route Direct Native Call through runtime_invoke: it uses a distinct ABI.
+static BOOL ZNCustomerExecuteMethodRecord(ZNRuntimeMethodActionRecord *record,
+                                          NSUInteger argumentIndex,
+                                          NSString *overrideValue,
+                                          NSString **error) {
+    if (!record) { if(error)*error=@"Runtime Action 不存在"; return NO; }
+    if(record.executionKind==ZNRuntimeActionKindIL2CPPMethodCall)
+        return [[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record
+                                                       argumentIndex:argumentIndex
+                                                               value:overrideValue
+                                                               error:error];
+    if(record.executionKind!=ZNRuntimeActionKindDirectNativeCall){
+        if(error)*error=@"不支持的 Runtime Action 类型"; return NO;
+    }
+    NSMutableArray<NSString *> *values=[record.argumentValues mutableCopy]?:[NSMutableArray array];
+    if(values.count!=record.argumentCount){
+        if(error)*error=@"Direct Native Call 预埋参数数量不一致"; return NO;
+    }
+    if(argumentIndex!=NSNotFound){
+        if(argumentIndex>=values.count||!overrideValue){
+            if(error)*error=@"Direct Native Call 参数索引无效"; return NO;
+        }
+        values[argumentIndex]=overrideValue;
+    }
+    NSString *owner=record.namespaceName.length
+        ? [NSString stringWithFormat:@"%@.%@",record.namespaceName,record.className]
+        : record.className;
+    NSString *expression=[NSString stringWithFormat:@"%@!%@::%@/%lu",
+        record.assembly,owner,record.methodName,(unsigned long)record.argumentCount];
+    NSString *resolveError=nil;
+    NSDictionary *candidate=[[ZNIL2CPPHybridFinder sharedFinder] resolveExpression:expression error:&resolveError];
+    if(!candidate){if(error)*error=resolveError?:@"Direct Native Call 无法解析目标方法";return NO;}
+    NSDictionary *expected=@{@"assembly":record.assembly?:@"",
+                             @"namespace":record.namespaceName?:@"",
+                             @"class":record.className?:@"",
+                             @"method":record.methodName?:@""};
+    for(NSString *key in expected){
+        NSString *actual=[candidate[key] isKindOfClass:NSString.class]?candidate[key]:@"";
+        if(![actual isEqualToString:expected[key]]){
+            if(error)*error=[NSString stringWithFormat:@"Direct Native Call 方法身份不匹配：%@",key];
+            return NO;
+        }
+    }
+    if([candidate[@"argumentCount"] unsignedIntegerValue]!=record.argumentCount){
+        if(error)*error=@"Direct Native Call 参数数量与 Runtime 元数据不匹配"; return NO;
+    }
+    if(record.signatureAvailable){
+        NSString *signatureError=nil;
+        NSArray<NSString *> *types=ZNIL2CPPParameterTypeNamesForCandidate(candidate,&signatureError);
+        if(!types||![types isEqualToArray:record.parameterTypeNames]){
+            if(error)*error=signatureError?:@"Direct Native Call 参数签名与目标版本不匹配";
+            return NO;
+        }
+    }
+    NSString *abiError=nil;
+    if(![[ZNDirectNativeCallEngine sharedEngine] supportsCandidate:candidate reason:&abiError]){
+        if(error)*error=abiError?:@"Direct Native Call ABI 不支持"; return NO;
+    }
+    return [[ZNDirectNativeCallEngine sharedEngine] executeCandidate:candidate
+                                                       argumentValues:values error:error]!=nil;
+}
 
 // Static Dispatch is reused verbatim: ownership, atomic target writes and rollback
 // stay in the audited developer runtime. Never write executable memory here.
@@ -50,8 +116,11 @@
         NSMutableDictionary<NSString *,ZNRuntimeMethodActionRecord *> *methodMap=[NSMutableDictionary dictionary];
         NSMutableDictionary<NSString *,NSNumber *> *argumentMap=[NSMutableDictionary dictionary];
         if(!_lastControlValues)_lastControlValues=[NSMutableDictionary dictionary];
-        for(ZNRuntimeMethodActionRecord *record in methods.records) {
-            NSString *base=[NSString stringWithFormat:@"method:%@:%u:%@",record.sourceImage?:@"",record.actionID,record.canonicalIdentity?:@""];
+        NSMutableArray<ZNRuntimeMethodActionRecord *> *allMethodActions=[NSMutableArray arrayWithArray:methods.records?:@[]];
+        [allMethodActions addObjectsFromArray:methods.directRecords?:@[]];
+        for(ZNRuntimeMethodActionRecord *record in allMethodActions) {
+            NSString *prefix=record.executionKind==ZNRuntimeActionKindDirectNativeCall?@"direct":@"method";
+            NSString *base=[NSString stringWithFormat:@"%@:%@:%u:%@",prefix,record.sourceImage?:@"",record.actionID,record.canonicalIdentity?:@""];
             NSMutableArray<NSNumber *> *visibleArguments=[NSMutableArray array];
             if(record.argumentControlConfigs.count==record.argumentCount) {
                 for(NSUInteger index=0;index<record.argumentCount;index++){
@@ -135,7 +204,7 @@
                 return NO;
             }
             NSString *argumentValue=enabled?onValue:@"0";
-            BOOL success=[[ZNRuntimeActionRuntime sharedRuntime] executeRecord:method argumentIndex:argumentIndex value:argumentValue error:error];
+            BOOL success=ZNCustomerExecuteMethodRecord(method,argumentIndex,argumentValue,error);
             if(success)@synchronized(self){_lastControlValues[identifier]=@(enabled);}
             return success;
         }
@@ -152,10 +221,10 @@
         if(error)*error=@"Runtime Method 不存在或已失效，请重新打开菜单";
         return NO;
     }
-    if(!index)return [[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record error:error];
+    if(!index)return ZNCustomerExecuteMethodRecord(record,NSNotFound,nil,error);
     if(!value){
         // Button controls retain their authored argument value.
-        return [[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record error:error];
+        return ZNCustomerExecuteMethodRecord(record,NSNotFound,nil,error);
     }
     if(!std::isfinite(value.doubleValue)){
         if(error)*error=@"数值必须是有限数";
@@ -168,7 +237,7 @@
         return NO;
     }
     NSString *valueText=[value stringValue];
-    BOOL success=[[ZNRuntimeActionRuntime sharedRuntime] executeRecord:record argumentIndex:index.unsignedIntegerValue value:valueText error:error];
+    BOOL success=ZNCustomerExecuteMethodRecord(record,index.unsignedIntegerValue,valueText,error);
     if(success)@synchronized(self){_lastControlValues[identifier]=value;}
     return success;
 }
