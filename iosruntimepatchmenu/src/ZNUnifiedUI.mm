@@ -5429,6 +5429,7 @@ static NSString *ZN60V3CopyText(NSDictionary *candidate) {
 - (void)zn60v3_backToResults:(id)sender {
     [self zn60v3_setPage:ZN60V3PageResults];
     [self renderPage];
+    ZNM64RestoreScrollOffset(self,kZNM64MethodScrollOffsetKey,self.contentScroll);
 }
 
 - (void)zn60v3_copyValue:(UIButton *)sender {
@@ -12077,12 +12078,28 @@ static const void *kZNM54HistoryKey = &kZNM54HistoryKey;
 static const void *kZNM64ClassModeKey=&kZNM64ClassModeKey;
 static const void *kZNM64ClassResultsKey=&kZNM64ClassResultsKey;
 static const void *kZNM64MethodRefineKey=&kZNM64MethodRefineKey;
+static const void *kZNM64ClassScrollOffsetKey=&kZNM64ClassScrollOffsetKey;
+static const void *kZNM64MethodScrollOffsetKey=&kZNM64MethodScrollOffsetKey;
 static const void *kZNM64MethodRowsStartKey=&kZNM64MethodRowsStartKey;
 static const NSInteger kZNM64MethodRefineCountTag=649311;
 static const void *kZNM64SelectedClassKey=&kZNM64SelectedClassKey;
 static const void *kZNM64SearchTokenKey=&kZNM64SearchTokenKey;
 static NSString *const kZNM64ClassHistoryKey=@"zonoe.m6.14.class-history.v1";
 static BOOL ZNM64IsClassMode(id owner){return [objc_getAssociatedObject(owner,kZNM64ClassModeKey) boolValue];}
+// Retain each Method Finder list offset separately; clamp after rendering to current content height.
+static void ZNM64SaveScrollOffset(id owner,const void *key,UIScrollView *scroll){
+    if(!owner||!scroll)return;
+    objc_setAssociatedObject(owner,key,@(scroll.contentOffset.y),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+static void ZNM64RestoreScrollOffset(id owner,const void *key,UIScrollView *scroll){
+    NSNumber *saved=owner?objc_getAssociatedObject(owner,key):nil;
+    if(!scroll||![saved isKindOfClass:NSNumber.class])return;
+    [scroll layoutIfNeeded];
+    CGFloat maxY=MAX(0.0,scroll.contentSize.height-CGRectGetHeight(scroll.bounds)+scroll.adjustedContentInset.bottom);
+    CGFloat minY=-scroll.adjustedContentInset.top;
+    CGFloat target=MIN(MAX((CGFloat)saved.doubleValue,minY),maxY);
+    [scroll setContentOffset:CGPointMake(scroll.contentOffset.x,target) animated:NO];
+}
 static NSArray<NSString *> *ZNM64ClassHistory(void){
     id value=[NSUserDefaults.standardUserDefaults objectForKey:kZNM64ClassHistoryKey];
     return [value isKindOfClass:NSArray.class]?value:@[];
@@ -12385,6 +12402,8 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
         NSString *query=ZNM54Trim([self zn57mf_query]);
         if(!query.length){[self zn60v3_setStatus:@"请输入类名"];[self renderPage];return;}
         ZNM64SaveClassHistory(query);
+        objc_setAssociatedObject(self,kZNM64ClassScrollOffsetKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(self,kZNM64MethodScrollOffsetKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         objc_setAssociatedObject(self,kZNM64MethodRefineKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
         NSString *token=NSUUID.UUID.UUIDString;
         objc_setAssociatedObject(self,kZNM64SearchTokenKey,token,OBJC_ASSOCIATION_COPY_NONATOMIC);
@@ -12418,6 +12437,7 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
         });
         return;
     }
+    objc_setAssociatedObject(self,kZNM64MethodScrollOffsetKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self,kZNM64MethodRefineKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
     ZNM54RecordHistory([self zn57mf_query]);
     [self znm54_dispatchMethodSearch:sender];
@@ -12443,6 +12463,8 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     BOOL next=!ZNM64IsClassMode(self);
     objc_setAssociatedObject(self,kZNM64ClassModeKey,@(next),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self,kZNM64SelectedClassKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self,kZNM64ClassScrollOffsetKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self,kZNM64MethodScrollOffsetKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self,kZNM64MethodRefineKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
     [self zn60v3_setCandidates:@[]];
     [self zn60v3_setSelected:nil];
@@ -12456,10 +12478,13 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     objc_setAssociatedObject(self,kZNM64SearchTokenKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [self zn60v3_setPage:1];
     [self renderPage];
+    ZNM64RestoreScrollOffset(self,kZNM64ClassScrollOffsetKey,self.contentScroll);
 }
 - (void)znm64_selectClass:(UIButton *)sender {
     NSDictionary *identity=objc_getAssociatedObject(sender,kZNM54CandidateKey);
     if(!identity)return;
+    ZNM64SaveScrollOffset(self,kZNM64ClassScrollOffsetKey,self.contentScroll);
+    objc_setAssociatedObject(self,kZNM64MethodScrollOffsetKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self,kZNM64MethodRefineKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
     NSString *token=NSUUID.UUID.UUIDString;
     objc_setAssociatedObject(self,kZNM64SearchTokenKey,token,OBJC_ASSOCIATION_COPY_NONATOMIC);
@@ -12709,6 +12734,7 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
 - (void)znm54_openDetail:(UIButton *)sender {
     NSDictionary *candidate = objc_getAssociatedObject(sender, kZNM54CandidateKey);
     if (!candidate) return;
+    ZNM64SaveScrollOffset(self,kZNM64MethodScrollOffsetKey,self.contentScroll);
     [self zn60v3_setSelected:candidate];
     [self zn60v3_setPage:2];
     [self renderPage];
