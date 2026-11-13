@@ -12418,6 +12418,100 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     [self znm442_submitSearch:sender];
 }
 
+
+- (void)znm64_cancelSearch:(id)sender {
+    (void)sender;
+    objc_setAssociatedObject(self,kZNM64SearchTokenKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self zn60v3_setStatus:@"搜索已取消"];
+    [self renderPage];
+}
+- (void)znm64_toggleMode:(id)sender {
+    (void)sender;
+    [self.hostWindow endEditing:YES];
+    objc_setAssociatedObject(self,kZNM64SearchTokenKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    BOOL next=!ZNM64IsClassMode(self);
+    objc_setAssociatedObject(self,kZNM64ClassModeKey,@(next),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self,kZNM64SelectedClassKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self zn60v3_setCandidates:@[]];
+    [self zn60v3_setSelected:nil];
+    [self zn60v3_setStatus:@""];
+    [self zn60v3_setPage:0];
+    [self renderPage];
+}
+- (void)znm64_backToClasses:(id)sender {
+    (void)sender;
+    objc_setAssociatedObject(self,kZNM64SelectedClassKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self,kZNM64SearchTokenKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self zn60v3_setPage:1];
+    [self renderPage];
+}
+- (void)znm64_selectClass:(UIButton *)sender {
+    NSDictionary *identity=objc_getAssociatedObject(sender,kZNM54CandidateKey);
+    if(!identity)return;
+    NSString *token=NSUUID.UUID.UUIDString;
+    objc_setAssociatedObject(self,kZNM64SearchTokenKey,token,OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(self,kZNM64SelectedClassKey,identity,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self zn60v3_setCandidates:@[]];
+    [self zn60v3_setStatus:@"正在加载类内方法…"];
+    [self zn60v3_setPage:1];[self renderPage];
+    NSUInteger limit=[self zn60v3_limit];
+    __weak ZNRuntimeMenuControllerV040 *weakSelf=self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0), ^{
+        BOOL (^cancel)(void)=^BOOL{
+            ZNRuntimeMenuControllerV040 *owner=weakSelf;
+            return !owner||![objc_getAssociatedObject(owner,kZNM64SearchTokenKey) isEqual:token];
+        };
+        NSString *error=nil;
+        NSArray *methods=[[ZNIL2CPPHybridFinder sharedFinder] zn64_methodsForClass:identity limit:limit cancel:cancel error:&error];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            ZNRuntimeMenuControllerV040 *owner=weakSelf;
+            if(!owner||cancel())return;
+            objc_setAssociatedObject(owner,kZNM64SearchTokenKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [owner zn60v3_setCandidates:methods?:@[]];
+            [owner znm42_setFilter:-1];
+            [owner zn60v3_setStatus:methods.count
+                ? [NSString stringWithFormat:@"%@ · %lu 个方法",identity[@"class"],(unsigned long)methods.count]
+                : (error?:@"该类没有可枚举的方法")];
+            [owner renderPage];
+        });
+    });
+}
+- (void)znm64_renderClassResultsAtWidth:(CGFloat)width {
+    [self znm65_stopLiveHookStatusTimer];
+    NSArray<NSDictionary *> *classes=objc_getAssociatedObject(self,kZNM64ClassResultsKey)?:@[];
+    CGFloat y=9;
+    UIView *header=[self cardAtY:y height:48 width:width compact:NO];
+    UIButton *back=[self zn60v3_plainButton:@"‹ 搜索" selector:@selector(zn60v3_backToSearch:) frame:CGRectMake(10,8,70,31)];
+    [header addSubview:back];
+    UILabel *title=[self label:[NSString stringWithFormat:@"类搜索结果（%lu）",(unsigned long)classes.count]
+        size:11.8 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
+    title.frame=CGRectMake(88,8,header.bounds.size.width-100,31);
+    [header addSubview:title];[self.contentView addSubview:header];y+=56;
+    if(classes.count && [classes.firstObject[@"truncated"] boolValue]){
+        UIView *notice=[self cardAtY:y height:40 width:width compact:NO];
+        UILabel *info=[self label:@"扫描时间或数量受限，结果可能不完整" size:9 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
+        info.frame=CGRectMake(12,6,notice.bounds.size.width-24,28);
+        [notice addSubview:info];[self.contentView addSubview:notice];y+=48;
+    }
+    for(NSDictionary *entry in classes){
+        UIView *card=[self cardAtY:y height:62 width:width compact:NO];
+        UIButton *open=[self zn60v3_plainButton:@"查看方法 ›" selector:@selector(znm64_selectClass:)
+            frame:CGRectMake(card.bounds.size.width-102,15,90,32)];
+        objc_setAssociatedObject(open,kZNM54CandidateKey,entry,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [card addSubview:open];
+        UILabel *className=[self label:entry[@"class"]?:@"?" size:11 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
+        className.frame=CGRectMake(12,8,card.bounds.size.width-120,24);
+        className.lineBreakMode=NSLineBreakByTruncatingMiddle;
+        [card addSubview:className];
+        NSString *ns=entry[@"namespace"]?:@"";
+        UILabel *detail=[self label:[NSString stringWithFormat:@"%@ · %@",entry[@"assembly"]?:@"",ns.length?ns:@"(global)"]
+            size:8.8 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
+        detail.frame=CGRectMake(12,34,card.bounds.size.width-120,17);
+        detail.lineBreakMode=NSLineBreakByTruncatingMiddle;
+        [card addSubview:detail];[self.contentView addSubview:card];y+=70;
+    }
+    [self zn40_updateContentHeight:y];
+}
 - (void)znm54_historyTapped:(UIButton *)sender {
     NSString *value = objc_getAssociatedObject(sender, kZNM54HistoryKey);
     if (!value.length) return;
