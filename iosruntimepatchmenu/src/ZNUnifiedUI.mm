@@ -12076,9 +12076,9 @@ static const void *kZNM54FilterKey = &kZNM54FilterKey;
 static const void *kZNM54HistoryKey = &kZNM54HistoryKey;
 static const void *kZNM64ClassModeKey=&kZNM64ClassModeKey;
 static const void *kZNM64ClassResultsKey=&kZNM64ClassResultsKey;
-static const void *kZNM64RefineQueryKey=&kZNM64RefineQueryKey;
-static const NSInteger kZNM64RefineCountTag=649301;
-static const NSInteger kZNM64RefineListTag=649302;
+static const void *kZNM64MethodRefineKey=&kZNM64MethodRefineKey;
+static const void *kZNM64MethodRowsStartKey=&kZNM64MethodRowsStartKey;
+static const NSInteger kZNM64MethodRefineCountTag=649311;
 static const void *kZNM64SelectedClassKey=&kZNM64SelectedClassKey;
 static const void *kZNM64SearchTokenKey=&kZNM64SearchTokenKey;
 static NSString *const kZNM64ClassHistoryKey=@"zonoe.m6.14.class-history.v1";
@@ -12109,9 +12109,9 @@ static void ZNM64SaveClassHistory(NSString *query){
 - (void)znm64_selectClass:(UIButton *)sender;
 - (void)znm64_backToClasses:(id)sender;
 - (void)znm64_renderClassResultsAtWidth:(CGFloat)width;
-- (void)znm64_refineChanged:(UITextField *)field;
-- (void)znm64_refineDone:(UITextField *)field;
-- (void)znm64_renderRefinedClassCardsIn:(UIView *)list width:(CGFloat)width;
+- (void)znm64_methodRefineChanged:(UITextField *)field;
+- (void)znm64_methodRefineDone:(UITextField *)field;
+- (void)znm64_applyMethodRefine;
 - (void)znm54_addMethodQueryRowToCard:(UIView *)card;
 - (void)znm54_historyTapped:(UIButton *)sender;
 - (void)znm54_filterTapped:(UIButton *)sender;
@@ -12385,8 +12385,7 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
         NSString *query=ZNM54Trim([self zn57mf_query]);
         if(!query.length){[self zn60v3_setStatus:@"请输入类名"];[self renderPage];return;}
         ZNM64SaveClassHistory(query);
-        // A new Runtime scan starts a new result set. Never reuse an old local filter.
-        objc_setAssociatedObject(self,kZNM64RefineQueryKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
+        objc_setAssociatedObject(self,kZNM64MethodRefineKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
         NSString *token=NSUUID.UUID.UUIDString;
         objc_setAssociatedObject(self,kZNM64SearchTokenKey,token,OBJC_ASSOCIATION_COPY_NONATOMIC);
         objc_setAssociatedObject(self,kZNM64SelectedClassKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -12419,6 +12418,7 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
         });
         return;
     }
+    objc_setAssociatedObject(self,kZNM64MethodRefineKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
     ZNM54RecordHistory([self zn57mf_query]);
     [self znm54_dispatchMethodSearch:sender];
 }
@@ -12443,7 +12443,7 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     BOOL next=!ZNM64IsClassMode(self);
     objc_setAssociatedObject(self,kZNM64ClassModeKey,@(next),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(self,kZNM64SelectedClassKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(self,kZNM64RefineQueryKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(self,kZNM64MethodRefineKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
     [self zn60v3_setCandidates:@[]];
     [self zn60v3_setSelected:nil];
     [self zn60v3_setStatus:@""];
@@ -12460,6 +12460,7 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
 - (void)znm64_selectClass:(UIButton *)sender {
     NSDictionary *identity=objc_getAssociatedObject(sender,kZNM54CandidateKey);
     if(!identity)return;
+    objc_setAssociatedObject(self,kZNM64MethodRefineKey,nil,OBJC_ASSOCIATION_COPY_NONATOMIC);
     NSString *token=NSUUID.UUID.UUIDString;
     objc_setAssociatedObject(self,kZNM64SearchTokenKey,token,OBJC_ASSOCIATION_COPY_NONATOMIC);
     objc_setAssociatedObject(self,kZNM64SelectedClassKey,identity,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -12488,57 +12489,63 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
         });
     });
 }
-// Local refinement is intentionally derived from the retained class scan result.
-// Never mutate kZNM64ClassResultsKey or launch another IL2CPP scan while typing.
-- (void)znm64_refineChanged:(UITextField *)field {
-    objc_setAssociatedObject(self,kZNM64RefineQueryKey,field.text?:@"",OBJC_ASSOCIATION_COPY_NONATOMIC);
-    UIView *list=[self.contentView viewWithTag:kZNM64RefineListTag];
-    if([list isKindOfClass:UIView.class])
-        [self znm64_renderRefinedClassCardsIn:list width:CGRectGetWidth(list.bounds)];
+// Refine only currently rendered method candidates. No runtime query, no page rebuild.
+- (void)znm64_methodRefineChanged:(UITextField *)field {
+    objc_setAssociatedObject(self,kZNM64MethodRefineKey,field.text?:@"",OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [self znm64_applyMethodRefine];
 }
-
-- (void)znm64_refineDone:(UITextField *)field {
+- (void)znm64_methodRefineDone:(UITextField *)field {
     [field resignFirstResponder];
 }
-
-- (void)znm64_renderRefinedClassCardsIn:(UIView *)list width:(CGFloat)width {
-    [list.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];
-    NSArray<NSDictionary *> *all=objc_getAssociatedObject(self,kZNM64ClassResultsKey)?:@[];
-    NSString *query=ZNM54Trim(objc_getAssociatedObject(self,kZNM64RefineQueryKey));
-    NSMutableArray<NSDictionary *> *visible=[NSMutableArray arrayWithCapacity:all.count];
-    for(NSDictionary *entry in all){
-        NSString *name=[entry[@"class"] isKindOfClass:NSString.class]?entry[@"class"]:@"";
-        NSString *ns=[entry[@"namespace"] isKindOfClass:NSString.class]?entry[@"namespace"]:@"";
-        NSString *assembly=[entry[@"assembly"] isKindOfClass:NSString.class]?entry[@"assembly"]:@"";
-        BOOL match=!query.length;
-        if(!match){
-            for(NSString *text in @[name,ns,assembly]){
-                if([text rangeOfString:query options:(NSCaseInsensitiveSearch|NSDiacriticInsensitiveSearch)].location!=NSNotFound){
-                    match=YES;break;
-                }
-            }
-        }
-        if(match)[visible addObject:entry];
+- (void)znm64_applyMethodRefine {
+    NSNumber *start=objc_getAssociatedObject(self,kZNM64MethodRowsStartKey);
+    if(!start)return;
+    NSString *query=ZNM54Trim(objc_getAssociatedObject(self,kZNM64MethodRefineKey));
+    NSInteger arity=[self znm42_filter];
+    CGFloat y=start.doubleValue;
+    NSUInteger matched=0;
+    NSArray *all=[self zn60v3_candidates]?:@[];
+    for(UIView *card in self.contentView.subviews){
+        NSDictionary *candidate=objc_getAssociatedObject(card,kZNM613CardCandidateKey);
+        if(![candidate isKindOfClass:NSDictionary.class])continue;
+        NSString *method=[candidate[@"method"] isKindOfClass:NSString.class]?candidate[@"method"]:@"";
+        BOOL match=(arity<0 || [candidate[@"argumentCount"] integerValue]==arity)
+            && (!query.length || [method rangeOfString:query options:(NSCaseInsensitiveSearch|NSDiacriticInsensitiveSearch)].location!=NSNotFound);
+        card.hidden=!match;
+        if(!match)continue;
+        CGRect frame=card.frame;
+        frame.origin.y=y;
+        card.frame=frame;
+        y+=CGRectGetHeight(frame)+8.0;
+        matched++;
     }
-
-    UILabel *count=(UILabel *)[self.contentView viewWithTag:kZNM64RefineCountTag];
-    if([count isKindOfClass:UILabel.class])
-        count.text=query.length
-            ? [NSString stringWithFormat:@"类搜索结果（%lu/%lu）",(unsigned long)visible.count,(unsigned long)all.count]
-            : [NSString stringWithFormat:@"类搜索结果（%lu）",(unsigned long)all.count];
-
-    CGFloat y=0.0;
-    if(!visible.count){
-        UIView *empty=[self cardAtY:y height:48 width:width compact:NO];
-        UILabel *hint=[self label:@"当前结果中没有匹配的类；清空筛选可恢复列表"
-                              size:9.0 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
-        hint.frame=CGRectMake(12,8,CGRectGetWidth(empty.bounds)-24,32);
-        hint.numberOfLines=2;
-        [empty addSubview:hint];
-        [list addSubview:empty];
-        y+=56.0;
+    UILabel *count=(UILabel *)[self.contentView viewWithTag:kZNM64MethodRefineCountTag];
+    if([count isKindOfClass:UILabel.class]){
+        count.text=(arity>=0||query.length)
+            ? [NSString stringWithFormat:@"搜索结果（%lu/%lu）",(unsigned long)matched,(unsigned long)all.count]
+            : [NSString stringWithFormat:@"搜索结果（%lu）",(unsigned long)all.count];
     }
-    for(NSDictionary *entry in visible){
+    [self zn40_updateContentHeight:y];
+}
+
+- (void)znm64_renderClassResultsAtWidth:(CGFloat)width {
+    [self znm65_stopLiveHookStatusTimer];
+    NSArray<NSDictionary *> *classes=objc_getAssociatedObject(self,kZNM64ClassResultsKey)?:@[];
+    CGFloat y=9;
+    UIView *header=[self cardAtY:y height:48 width:width compact:NO];
+    UIButton *back=[self zn60v3_plainButton:@"‹ 搜索" selector:@selector(zn60v3_backToSearch:) frame:CGRectMake(10,8,70,31)];
+    [header addSubview:back];
+    UILabel *title=[self label:[NSString stringWithFormat:@"类搜索结果（%lu）",(unsigned long)classes.count]
+        size:11.8 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
+    title.frame=CGRectMake(88,8,header.bounds.size.width-100,31);
+    [header addSubview:title];[self.contentView addSubview:header];y+=56;
+    if(classes.count && [classes.firstObject[@"truncated"] boolValue]){
+        UIView *notice=[self cardAtY:y height:40 width:width compact:NO];
+        UILabel *info=[self label:@"扫描时间或数量受限，结果可能不完整" size:9 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
+        info.frame=CGRectMake(12,6,notice.bounds.size.width-24,28);
+        [notice addSubview:info];[self.contentView addSubview:notice];y+=48;
+    }
+    for(NSDictionary *entry in classes){
         UIView *card=[self cardAtY:y height:62 width:width compact:NO];
         UIButton *open=[self zn60v3_plainButton:@"查看方法 ›" selector:@selector(znm64_selectClass:)
             frame:CGRectMake(card.bounds.size.width-102,15,90,32)];
@@ -12553,54 +12560,9 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
             size:8.8 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
         detail.frame=CGRectMake(12,34,card.bounds.size.width-120,17);
         detail.lineBreakMode=NSLineBreakByTruncatingMiddle;
-        [card addSubview:detail];
-        [list addSubview:card];
-        y+=70.0;
+        [card addSubview:detail];[self.contentView addSubview:card];y+=70;
     }
-    CGRect frame=list.frame;
-    frame.size.height=y;
-    list.frame=frame;
-    [self zn40_updateContentHeight:CGRectGetMinY(frame)+y];
-}
-
-- (void)znm64_renderClassResultsAtWidth:(CGFloat)width {
-    [self znm65_stopLiveHookStatusTimer];
-    NSArray<NSDictionary *> *classes=objc_getAssociatedObject(self,kZNM64ClassResultsKey)?:@[];
-    CGFloat y=9;
-    UIView *header=[self cardAtY:y height:48 width:width compact:NO];
-    UIButton *back=[self zn60v3_plainButton:@"‹ 搜索" selector:@selector(zn60v3_backToSearch:) frame:CGRectMake(10,8,70,31)];
-    [header addSubview:back];
-    UILabel *title=[self label:@"" size:11.8 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
-    title.tag=kZNM64RefineCountTag;
-    title.frame=CGRectMake(88,8,header.bounds.size.width-100,31);
-    [header addSubview:title];[self.contentView addSubview:header];y+=56;
-
-    if(classes.count && [classes.firstObject[@"truncated"] boolValue]){
-        UIView *notice=[self cardAtY:y height:40 width:width compact:NO];
-        UILabel *info=[self label:@"扫描时间或数量受限，二次筛选只针对已加载的结果"
-            size:9 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
-        info.frame=CGRectMake(12,6,notice.bounds.size.width-24,28);
-        info.numberOfLines=2;
-        [notice addSubview:info];[self.contentView addSubview:notice];y+=48;
-    }
-
-    UIView *filterCard=[self cardAtY:y height:52 width:width compact:NO];
-    UITextField *field=ZNM54Field(CGRectMake(12,8,CGRectGetWidth(filterCard.bounds)-24,36),
-                                  self.theme,[self menuFont:10.5 weight:UIFontWeightMedium]);
-    field.text=objc_getAssociatedObject(self,kZNM64RefineQueryKey)?:@"";
-    field.placeholder=@"在当前结果中筛选类名 / 命名空间 / Assembly";
-    field.clearButtonMode=UITextFieldViewModeWhileEditing;
-    field.returnKeyType=UIReturnKeyDone;
-    [field addTarget:self action:@selector(znm64_refineChanged:) forControlEvents:UIControlEventEditingChanged];
-    [field addTarget:self action:@selector(znm64_refineDone:) forControlEvents:UIControlEventEditingDidEndOnExit];
-    [filterCard addSubview:field];
-    [self.contentView addSubview:filterCard];
-    y+=60.0;
-
-    UIView *list=[[UIView alloc]initWithFrame:CGRectMake(0,y,width,0)];
-    list.tag=kZNM64RefineListTag;
-    [self.contentView addSubview:list];
-    [self znm64_renderRefinedClassCardsIn:list width:width];
+    [self zn40_updateContentHeight:y];
 }
 - (void)znm54_historyTapped:(UIButton *)sender {
     NSString *value = objc_getAssociatedObject(sender, kZNM54HistoryKey);
@@ -14214,7 +14176,23 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     title.frame=CGRectMake(88,8,header.bounds.size.width-100,31);
     [header addSubview:title];
     [self.contentView addSubview:header];
+    title.tag=kZNM64MethodRefineCountTag;
     y+=56.0;
+
+    // Method name refinement is on the method RESULTS page, not class results.
+    UIView *methodRefineCard=[self cardAtY:y height:52 width:width compact:NO];
+    UITextField *methodRefineField=ZNM54Field(
+        CGRectMake(12,8,CGRectGetWidth(methodRefineCard.bounds)-24,36),
+        self.theme,[self menuFont:10.5 weight:UIFontWeightMedium]);
+    methodRefineField.text=objc_getAssociatedObject(self,kZNM64MethodRefineKey)?:@"";
+    methodRefineField.placeholder=@"在当前结果中筛选方法名";
+    methodRefineField.clearButtonMode=UITextFieldViewModeWhileEditing;
+    methodRefineField.returnKeyType=UIReturnKeyDone;
+    [methodRefineField addTarget:self action:@selector(znm64_methodRefineChanged:) forControlEvents:UIControlEventEditingChanged];
+    [methodRefineField addTarget:self action:@selector(znm64_methodRefineDone:) forControlEvents:UIControlEventEditingDidEndOnExit];
+    [methodRefineCard addSubview:methodRefineField];
+    [self.contentView addSubview:methodRefineCard];
+    y+=60.0;
 
     UIView *filterCard=[self cardAtY:y height:44 width:width compact:NO];
     UIScrollView *filterScroll=[[UIScrollView alloc]initWithFrame:CGRectMake(10,5,filterCard.bounds.size.width-20,34)];
@@ -14241,6 +14219,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     y+=52.0;
 
     // No page-level result card: status belongs to the selected method card.
+    objc_setAssociatedObject(self,kZNM64MethodRowsStartKey,@(y),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     for(NSUInteger row=0;row<visible.count;row++){
         NSDictionary *candidate=visible[row];
@@ -14459,6 +14438,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     }
 
     [self zn40_updateContentHeight:y];
+    [self znm64_applyMethodRefine];
     [self znm65_startLiveHookStatusTimer];
 }
 
