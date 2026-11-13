@@ -31,3 +31,11 @@ Change: `f029700d9928afeddf26b7178bbdeb3ea209fde6`.
 6. Confirm P1 action grid / P2 live filtering / execution controls still work.
 
 Validation: source commit is not a runtime result. CI/device status must be reported separately.
+
+## Actual CI record
+
+- Initial build Run `43374528037`: **failed** at the first compiler error, `ZNIL2CPPMethodFinderUIV3.mm:429:35: use of undeclared identifier 'kZNM64MethodScrollOffsetKey'`. Root cause: `zn60v3_backToResults:` is earlier within the merged `ZNUnifiedUI.mm` TU than Method Finder state declarations.
+- Root fix commit `9f4beaf37acc71a258ff114e251672f4c2139906`: forward-declare one narrow helper near the first UIKit import; its implementation next to Method Finder state resolves the associated-object key. No additional swizzle or unrelated dependency changes.
+- Second build Run `43374810610`: **success**, including arm64 build, dylib verification and upload.
+- Artifact `mymenu-M6.13.3-e558774` ID `14013319797`; extracted signed dylib SHA256 `ab8c763d813b2e116c08554aa6ae652bdcc06cd67d75e1735a83e467db3730fe`.
+- User/on-device acceptance remains **unverified**.
