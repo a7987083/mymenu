@@ -32,6 +32,7 @@
 #import "ZNIL2CPPResolver.h"
 #import "ZNDeferredBootstrap.h"
 #import "ZNRuntimeCapabilityCoordinator.h"
+#import "ZNMethodTranslator.h"
 
 static void ZNInstallV040Swizzles(void);
 
@@ -14271,7 +14272,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         // P1: dedicate the full top of the card to identity, then place actions below.
         // The former fixed 190pt side rail overlapped identity labels on narrow screens.
         const CGFloat actionGap=6.0;
-        const CGFloat actionTop=125.0;
+        const CGFloat actionTop=147.0; // P4: reserve Chinese method gloss row
         const CGFloat actionPitch=32.0;
         const CGFloat topAreaH=actionTop+actionPitch*4.0+5.0;
         CGFloat paramH=argc?22.0+(CGFloat)argc*62.0:0.0;
@@ -14296,27 +14297,36 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         name.minimumScaleFactor=.65;
         [card addSubview:name];
 
+        // P4 display-only local gloss; never change candidate[@"method"].
+        NSString *gloss=[ZNMethodTranslator translateMethodName:method];
+        if(gloss.length){
+            UILabel *translation=[self label:gloss size:9.2 weight:UIFontWeightRegular color:self.theme.accentColor];
+            translation.frame=CGRectMake(13,31,leftW-8,18);
+            translation.lineBreakMode=NSLineBreakByTruncatingTail;
+            [card addSubview:translation];
+        }
+
         UILabel *owner=[self label:ZNM52XString(candidate[@"class"]) size:8.7 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
-        owner.frame=CGRectMake(13,32,leftW-8,17);
+        owner.frame=CGRectMake(13,54,leftW-8,17);
         owner.lineBreakMode=NSLineBreakByTruncatingMiddle;
         [card addSubview:owner];
 
         NSString *assembly=ZNM54AssemblyDisplay(ZNM52XString(candidate[@"assembly"]));
         UILabel *asmLabel=[self label:assembly size:8.0 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
-        asmLabel.frame=CGRectMake(13,52,leftW-8,16);
+        asmLabel.frame=CGRectMake(13,74,leftW-8,16);
         asmLabel.lineBreakMode=NSLineBreakByTruncatingTail;
         [card addSubview:asmLabel];
 
         UILabel *address=[self label:[NSString stringWithFormat:@"RVA %@ · %@",candidate[@"rvaText"]?:@"—",candidate[@"pointerKind"]?:@"?"]
                                   size:7.6 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
-        address.frame=CGRectMake(13,72,leftW-8,16);
+        address.frame=CGRectMake(13,94,leftW-8,16);
         address.lineBreakMode=NSLineBreakByTruncatingMiddle;
         [card addSubview:address];
 
         NSString *mode=ZNM613ModeForCandidate(self,candidate);
         UILabel *modeLabel=[self label:[NSString stringWithFormat:@"当前模式：%@",[mode isEqualToString:@"direct"]?@"Direct Native Call":([mode isEqualToString:@"hook"]?@"Native Hook":@"Runtime Method")]
                                     size:7.8 weight:UIFontWeightSemibold color:self.theme.accentColor];
-        modeLabel.frame=CGRectMake(13,96,leftW-8,18);
+        modeLabel.frame=CGRectMake(13,118,leftW-8,18);
         [card addSubview:modeLabel];
 
         // Two equal columns inside the card, never crossing the identity region.
