@@ -50,6 +50,7 @@
     "ad": "广告",
     "adapt": "使适应",
     "add": "增加",
+    "addcoingem": "增加金币和宝石",
     "addiction": "入迷",
     "addition": "加法",
     "additional": "附加的",
@@ -465,6 +466,7 @@
     "butter": "涂黄油于",
     "button": "按钮",
     "buy": "购买",
+    "buyweeklypass": "购买周卡",
     "by": "按",
     "bye": "结束命令",
     "cabin": "关在小屋",
@@ -585,7 +587,7 @@
     "city": "城市",
     "civil": "市民的",
     "civilization": "文明",
-    "claim": "要求",
+    "claim": "领取",
     "clarify": "使明晰",
     "class": "类",
     "classic": "古典作品",
@@ -1363,6 +1365,7 @@
     "gentleman": "绅士",
     "geography": "地理学",
     "get": "获取",
+    "getplayerlevel": "获取玩家等级",
     "ghost": "鬼似地游荡",
     "giant": "巨人",
     "gift": "礼物",
@@ -2422,6 +2425,7 @@
     "service": "服务",
     "session": "会话",
     "set": "设置",
+    "setloginsdkname": "设置登录 SDK 名称",
     "setting": "设置项",
     "settings": "设置",
     "seven": "七",
@@ -2999,10 +3003,6 @@
     "yet": "还",
     "you": "你",
     "young": "青年们",
-    "your": "你的",
-    "yours": "你的(东西)",
-    "yourself": "你自己",
-    "youth": "年轻",
-    "zero": "零"
+    "your": "你的"
   }
 }
