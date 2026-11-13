@@ -1,28 +1,32 @@
-# Method Finder P2: local secondary search — evidence and regression contract
+# Method Finder P2 — Method-name refinement (corrected)
 
-Baseline: `fix/method-finder-p1-card-layout@25d888baecd7720477f90e5ffe1171c34a7f870a`. P1 layout is preserved. P3 scroll-position restoration is out of scope.
+Baseline: P1 `fix/method-finder-p1-card-layout@25d888baecd7720477f90e5ffe1171c34a7f870a`.
+Correction commit: `ed56c3a3c039e922f5c12f33defd8c1fd9ded5a2`.
+Prior P2 class-list filter commit `cd2b0d8` was wrong in UX scope and is superseded: its class-list UI is removed from the current source. Keep history intact.
 
-## Source-level chain
+## Request / root cause
 
-1. `ZNUnifiedUI.mm:12376+` `znm54_submitSearch:` dispatches class searches to existing `ZNIL2CPPHybridFinder zn64_searchClasses:assembly:limit:cancel:error:`. This remains untouched.
-2. On the main queue, the scan result is retained as `kZNM64ClassResultsKey`, and the current page switches to Results. Original result dictionaries hold `assembly`, `namespace`, `class`, and optional `truncated`. No new Runtime scan is needed for local refinement.
-3. `ZNUnifiedUI.mm:14088+` `zn52x_renderResultsAtWidth:` checks class mode and absent `kZNM64SelectedClassKey`, then calls `znm64_renderClassResultsAtWidth:`. This final routing is unchanged.
-4. `znm64_selectClass:` receives the original identity dictionary via the `kZNM54CandidateKey` button association, then calls `zn64_methodsForClass:`. This must remain bit-for-bit behavior compatible.
+User expects a second search **within methods after finding and opening a class**, not within the class-name search result list.
 
-## P2 change
+Source evidence:
+- Class search: `ZNUnifiedUI.mm` `znm54_submitSearch:` -> `zn64_searchClasses:`; result list `znm64_renderClassResultsAtWidth:`. No input belongs here.
+- Class selection: `znm64_selectClass:` resolves `zn64_methodsForClass:` and updates `zn60v3_candidates`.
+- Final method result rendering: `zn52x_renderResultsAtWidth:` owns cards, binding every method card to a full candidate in `kZNM613CardCandidateKey` and controlling argument/execute actions.
+- `znm42_filter` already filters method arity. New text refinement must compose with it without changing `zn60v3_candidates` or backend.
+- P1 action grid `actionTop=125` retained unchanged.
 
-- Add one **results-only** UITextField above class cards. It filters the loaded snapshot by class name, namespace or Assembly using case/diacritic-insensitive substring comparison.
-- Keep the unfiltered result array immutable and untouched; derive visible cards on each keystroke.
-- Render cards in a dedicated child list container, **not** by calling `renderPage` in `UIControlEventEditingChanged`. This keeps the keyboard, editing caret and outer search UI stable.
-- Reflect `visible / loaded` counts. Empty local matches produce an explanatory empty card; clearing the field restores all loaded cards.
-- Show an explicit notice when the original snapshot was truncated by scan limits/time budgets: local refinement cannot recover omitted classes.
-- Persist the local filter string only for the current loaded class-result set; preserve it on drill-down/back; clear on a new class scan or when toggling search mode.
-- Keep selector bindings, class identity dictionaries, class method lookup, original Method Finder search, Runtime, Hook and Builder untouched. **No new Swizzle**.
-- Do not change outer `contentScroll.contentOffset` policy in P2; that is P3.
+## Corrected implementation contract
 
-## Evidence vs verification
+1. Restore unchanged class search results UI from the P1 source; remove incorrect local class-list filtering.
+2. Add a single method-name text field at the top of the actual method results page, below back/title and above the existing arity filter.
+3. Use the original full method candidate array; filter case- and diacritic-insensitive substrings of candidate[`method`] only. Do not mutate original candidate data.
+4. During text editing, do not call `renderPage` or recreate cards/controls. Iterate already rendered method cards via their candidate association, set `hidden`, reorder visible cards vertically, recompute content height and update visible/total count. Argument input state and first responder remain intact.
+5. Preserve class-scope method filter on return from method detail; reset it on new class selection, new search or mode change. Class list remains unfiltered.
+6. No new Swizzle, new backend scan, new execution path, or changes to Builder, Dobby Hook or native call. P3 scroll offset restore remains separate.
 
-- Static diff: only `ZNUnifiedUI.mm` and this audit document; no backend file changed.
-- Expected acceptance: query `cheat` returns an original class list, entering partial text filters instantly without a new scan or dismissing keyboard; clearing shows the complete cached set; a zero-match query shows an empty state; class drilldown/back preserves the filter; a new search resets it; method search mode remains unchanged.
-- Negative acceptance: no extra `method_exchangeImplementations`, no `renderPage` inside local `EditingChanged`, no changes to existing P1 action button grid.
-- CI success demonstrates compilation, **not** device behavior; record device test independently.
+## Validation
+
+- Static source/diff: corrected method results filter; original class list reverts; no `renderPage` inside EditingChanged.
+- CI compile and verify: independently checked in GitHub Actions.
+- Device acceptance: find a class with many methods, choose `查看方法`, type partial method name, observe `visible / loaded`; clear filter; switch arity filter; visit detail/back; test existing candidate buttons and args.
+- Device status: **UNVERIFIED** until user tests. No device hash or IMP trace implied.
