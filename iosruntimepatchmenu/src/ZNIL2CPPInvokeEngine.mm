@@ -213,12 +213,13 @@ static NSString *ZNInvokeParameterReason(NSDictionary *param) {
                                                argumentCount:(NSInteger)argumentCount];
     uintptr_t methodInfo = [resolved[@"methodInfo"] unsignedLongLongValue];
     if (!resolved || !methodInfo) {
-        if (error) *error = [NSString stringWithFormat:@"FAILED_RESOLVE：%@!%@.%@::%@/%lu",
+        if (error) *error = [NSString stringWithFormat:@"FAILED_RESOLVE：%@!%@.%@::%@/%lu · %@",
                              assembly ?: @"",
                              namespaceName ?: @"",
                              className ?: @"",
                              methodName ?: @"",
-                             (unsigned long)argumentCount];
+                             (unsigned long)argumentCount,
+                             resolver.lastError.length ? resolver.lastError : @"无法取得 MethodInfo"];
         return nil;
     }
 
