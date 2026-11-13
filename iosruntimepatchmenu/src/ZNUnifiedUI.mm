@@ -9689,8 +9689,8 @@ extern "C" void ZNInstallM441HotfixDeferred(void) {
     dispatch_once(&onceToken, ^{
         Class menu = NSClassFromString(@"ZNRuntimeMenuControllerV040");
         if (menu) {
-            ZNM441Swap(menu, @selector(zn60v3_renderSearchAtWidth:), @selector(znm441_renderSearchAtWidth:));
-            ZNM441Swap(menu, @selector(zn60v3_renderResultsAtWidth:), @selector(znm441_renderResultsAtWidth:));
+            // M6.14: old M4.4.1 UI decorators are superseded by M5.4 Search / M6.13.1 Results.
+            // Keep the endEditing and IL2CPP struct-invoke swaps below; both own non-UI behavior.
             ZNM441Swap(menu, @selector(zn44_endEditing:), @selector(znm441_endEditing:));
         }
         Class engine = ZNIL2CPPInvokeEngine.class;
