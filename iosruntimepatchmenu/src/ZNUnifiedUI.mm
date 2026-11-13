@@ -12432,21 +12432,26 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
 // Own the search row in one place: changing the label to a mode toggle
 // later must not change query, limit, Assembly, or legacy method search state.
 - (void)znm54_addMethodQueryRowToCard:(UIView *)card {
-    UILabel *methodLabel = [self label:@"方法名" size:8.8 weight:UIFontWeightSemibold color:self.theme.secondaryTextColor];
-    methodLabel.frame = CGRectMake(13, 35, 55, 34);
-    [card addSubview:methodLabel];
+    BOOL classMode=ZNM64IsClassMode(self);
+    UIButton *modeButton=[self zn60v3_plainButton:(classMode?@"类名 ⇄":@"方法名 ⇄")
+        selector:@selector(znm64_toggleMode:) frame:CGRectMake(10,35,58,34)];
+    modeButton.titleLabel.font=[self menuFont:9 weight:UIFontWeightSemibold];
+    [card addSubview:modeButton];
     CGFloat buttonW = 68.0;
     UITextField *query = ZNM54Field(CGRectMake(68, 34, card.bounds.size.width - 81 - buttonW - 7, 36), self.theme, [self menuFont:10.5 weight:UIFontWeightMedium]);
     query.tag = kZNM54QueryTag;
     query.text = [self zn57mf_query];
-    query.placeholder = @"方法名 / Class::Method / RVA";
+    query.placeholder = classMode?@"类名包含匹配，如 cheat":@"方法名 / Class::Method / RVA";
     query.returnKeyType = UIReturnKeySearch;
     query.clearButtonMode = UITextFieldViewModeWhileEditing;
     [query addTarget:self action:@selector(znm54_queryChanged:) forControlEvents:UIControlEventEditingChanged];
     [query addTarget:self action:@selector(znm54_submitSearch:) forControlEvents:UIControlEventEditingDidEndOnExit];
     [card addSubview:query];
     
-    UIButton *search = [self zn40_button:@"搜索" selector:@selector(znm54_submitSearch:) frame:CGRectMake(CGRectGetMaxX(query.frame) + 7, 34, buttonW, 36)];
+    BOOL searching=classMode&&objc_getAssociatedObject(self,kZNM64SearchTokenKey)!=nil;
+    UIButton *search = [self zn40_button:searching?@"取消":@"搜索"
+        selector:searching?@selector(znm64_cancelSearch:):@selector(znm54_submitSearch:)
+        frame:CGRectMake(CGRectGetMaxX(query.frame) + 7, 34, buttonW, 36)];
     search.backgroundColor = [self.theme.accentColor colorWithAlphaComponent:0.20];
     search.layer.borderColor = self.theme.accentColor.CGColor;
     [card addSubview:search];
@@ -12490,7 +12495,7 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     [self.contentView addSubview:card];
     y += 178.0;
 
-    NSArray<NSString *> *history = ZNM54History();
+    NSArray<NSString *> *history = ZNM64IsClassMode(self)?ZNM64ClassHistory():ZNM54History();
     if (history.count) {
         CGFloat rowH = 31.0;
         CGFloat visibleRows = MIN((CGFloat)history.count, 6.0);
@@ -12579,6 +12584,9 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
 }
 
 - (void)znm54_renderResultsAtWidth:(CGFloat)width {
+    if(ZNM64IsClassMode(self) && !objc_getAssociatedObject(self,kZNM64SelectedClassKey)){
+        [self znm64_renderClassResultsAtWidth:width];return;
+    }
     NSArray<NSDictionary *> *all = [self zn60v3_candidates] ?: @[];
     NSArray<NSDictionary *> *visible = ZNM54Visible(self);
     NSMutableSet<NSNumber *> *aritySet = [NSMutableSet set];
@@ -12588,7 +12596,9 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
 
     CGFloat y = 9.0;
     UIView *header = [self cardAtY:y height:48 width:width compact:NO];
-    UIButton *back = [self zn60v3_plainButton:@"‹ 搜索" selector:@selector(zn60v3_backToSearch:) frame:CGRectMake(10, 8, 70, 31)];
+    UIButton *back = [self zn60v3_plainButton:ZNM64IsClassMode(self)?@"‹ 类列表":@"‹ 搜索"
+        selector:ZNM64IsClassMode(self)?@selector(znm64_backToClasses:):@selector(zn60v3_backToSearch:)
+        frame:CGRectMake(10, 8, 70, 31)];
     [header addSubview:back];
     UILabel *title = [self label:(filter < 0
                                    ? [NSString stringWithFormat:@"搜索结果（%lu）", (unsigned long)all.count]
