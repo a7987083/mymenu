@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - fix/method-finder-p1-card-layout
   workflow_dispatch:
 
 jobs:
