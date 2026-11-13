@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/method-finder-p4-local-translation
   workflow_dispatch:
 
 jobs:
