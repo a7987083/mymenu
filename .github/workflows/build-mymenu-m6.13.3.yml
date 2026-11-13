@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/method-finder-p3-scroll-restore
   workflow_dispatch:
 
 jobs:
