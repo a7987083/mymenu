@@ -65,6 +65,9 @@ static void ZNRuntimeCoreBootstrapV040(void) {
 
 #import "ZNTheme.h"
 
+// Implemented with Method Finder state below; declared here for the earlier V3 back handler.
+static void ZNM64RestoreMethodResultsScroll(id owner, UIScrollView *scroll);
+
 static NSString * const kZNMenuVersion = @"0.5.6.2-ui-core";
 static NSString * const kZNFloatPositionKey = @"ZonoePatch.FloatCenter";
 static NSString * const kZNPanelPositionKey = @"ZonoePatch.PanelCenter";
@@ -5429,7 +5432,7 @@ static NSString *ZN60V3CopyText(NSDictionary *candidate) {
 - (void)zn60v3_backToResults:(id)sender {
     [self zn60v3_setPage:ZN60V3PageResults];
     [self renderPage];
-    ZNM64RestoreScrollOffset(self,kZNM64MethodScrollOffsetKey,self.contentScroll);
+    ZNM64RestoreMethodResultsScroll(self,self.contentScroll);
 }
 
 - (void)zn60v3_copyValue:(UIButton *)sender {
@@ -12099,6 +12102,9 @@ static void ZNM64RestoreScrollOffset(id owner,const void *key,UIScrollView *scro
     CGFloat minY=-scroll.adjustedContentInset.top;
     CGFloat target=MIN(MAX((CGFloat)saved.doubleValue,minY),maxY);
     [scroll setContentOffset:CGPointMake(scroll.contentOffset.x,target) animated:NO];
+}
+static void ZNM64RestoreMethodResultsScroll(id owner,UIScrollView *scroll){
+    ZNM64RestoreScrollOffset(owner,kZNM64MethodScrollOffsetKey,scroll);
 }
 static NSArray<NSString *> *ZNM64ClassHistory(void){
     id value=[NSUserDefaults.standardUserDefaults objectForKey:kZNM64ClassHistoryKey];
