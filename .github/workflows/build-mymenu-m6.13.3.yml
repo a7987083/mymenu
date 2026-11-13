@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - audit/method-finder-swizzle-m6133
   workflow_dispatch:
 
 jobs:
