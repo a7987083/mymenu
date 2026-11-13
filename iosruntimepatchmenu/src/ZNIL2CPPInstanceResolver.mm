@@ -9,11 +9,6 @@
 // - Fall back to allocate/finalize/free with GC world stop/start sequencing.
 // - Never guess when zero or multiple instances are returned.
 
-typedef void *(*ZNIRDomainGetFn)(void);
-typedef const void **(*ZNIRDomainGetAssembliesFn)(const void *, size_t *);
-typedef const void *(*ZNIRAssemblyGetImageFn)(const void *);
-typedef const char *(*ZNIRImageGetNameFn)(const void *);
-typedef void *(*ZNIRClassFromNameFn)(const void *, const char *, const char *);
 typedef void *(*ZNIRObjectGetClassFn)(void *);
 typedef bool (*ZNIRClassIsAssignableFromFn)(void *, void *);
 typedef void (*ZNIRRegisterObjectCallback)(void **objects, int count, void *userdata);
@@ -34,17 +29,6 @@ typedef struct {
 
 static NSString *ZNIRTrim(NSString *value) {
     return [value ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-}
-
-static NSString *ZNIRNormalizedAssembly(NSString *value) {
-    NSString *s = ZNIRTrim(value).lowercaseString;
-    return [s hasSuffix:@".dll"] ? [s substringToIndex:s.length - 4] : s;
-}
-
-static NSString *ZNIRString(const char *value) {
-    if (!value) return @"";
-    NSString *s = [NSString stringWithUTF8String:value];
-    return s ?: @"";
 }
 
 static void *ZNIRResolveSymbol(NSString *unityPath, const char *name) {
@@ -135,44 +119,16 @@ static void *ZNIRReallocate(void *ptr, size_t size, void *userdata) {
         return @[];
     }
     NSString *unityPath = resolver.unityPath ?: @"";
-    ZNIRDomainGetFn domainGet = (ZNIRDomainGetFn)ZNIRResolveSymbol(unityPath, "il2cpp_domain_get");
-    ZNIRDomainGetAssembliesFn domainGetAssemblies = (ZNIRDomainGetAssembliesFn)ZNIRResolveSymbol(unityPath, "il2cpp_domain_get_assemblies");
-    ZNIRAssemblyGetImageFn assemblyGetImage = (ZNIRAssemblyGetImageFn)ZNIRResolveSymbol(unityPath, "il2cpp_assembly_get_image");
-    ZNIRImageGetNameFn imageGetName = (ZNIRImageGetNameFn)ZNIRResolveSymbol(unityPath, "il2cpp_image_get_name");
-    ZNIRClassFromNameFn classFromName = (ZNIRClassFromNameFn)ZNIRResolveSymbol(unityPath, "il2cpp_class_from_name");
-    if (!domainGet || !domainGetAssemblies || !assemblyGetImage || !imageGetName || !classFromName) {
-        if (error) *error = @"FAILED_INSTANCE_API：缺少 domain/image/class API";
+    NSDictionary<NSString *, id> *resolvedClass = [resolver resolveClassAssembly:assembly
+                                                                         namespace:namespaceName ?: @""
+                                                                         className:wantedClass];
+    if (!resolvedClass) {
+        if (error) *error = [NSString stringWithFormat:@"FAILED_INSTANCE_CLASS：%@", resolver.lastError ?: @"无法解析目标类"];
         return @[];
     }
-
-    void *domain = domainGet();
-    size_t assemblyCount = 0;
-    const void **assemblies = domain ? domainGetAssemblies(domain, &assemblyCount) : NULL;
-    if (!assemblies || !assemblyCount) {
-        if (error) *error = @"FAILED_INSTANCE_API：IL2CPP Domain 没有程序集";
-        return @[];
-    }
-
-    NSString *wantedAssembly = ZNIRNormalizedAssembly(assembly);
+    void *targetClass = (void *)(uintptr_t)[resolvedClass[@"class"] unsignedLongLongValue];
+    NSString *resolvedAssembly = assembly ?: @"";
     NSString *wantedNamespace = namespaceName ?: @"";
-    void *targetClass = NULL;
-    NSString *resolvedAssembly = @"";
-    for (size_t i = 0; i < assemblyCount; i++) {
-        const void *image = assemblyGetImage(assemblies[i]);
-        if (!image) continue;
-        NSString *imageName = ZNIRString(imageGetName(image));
-        if (wantedAssembly.length && ![ZNIRNormalizedAssembly(imageName) isEqualToString:wantedAssembly]) continue;
-        void *klass = classFromName(image, wantedNamespace.UTF8String ?: "", wantedClass.UTF8String ?: "");
-        if (klass) {
-            targetClass = klass;
-            resolvedAssembly = imageName;
-            break;
-        }
-    }
-    if (!targetClass) {
-        if (error) *error = [NSString stringWithFormat:@"FAILED_INSTANCE_CLASS：%@!%@.%@", assembly ?: @"", wantedNamespace, wantedClass];
-        return @[];
-    }
 
     ZNIRLivenessFromStaticsFn fromStatics = (ZNIRLivenessFromStaticsFn)ZNIRResolveSymbol(unityPath, "il2cpp_unity_liveness_calculation_from_statics");
     ZNIRLivenessAllocateStructFn allocateStruct = (ZNIRLivenessAllocateStructFn)ZNIRResolveSymbol(unityPath, "il2cpp_unity_liveness_allocate_struct");

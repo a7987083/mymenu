@@ -29,6 +29,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSDictionary<NSString *, id> *)resolveNamedOffsetExpression:(NSString *)expression
                                                                    error:(NSString * _Nullable * _Nullable)error;
 
+// Shared class identity resolver for method invocation and instance discovery.
+// Returns current-domain image/class pointers; callers must not persist them.
+- (nullable NSDictionary<NSString *, id> *)resolveClassAssembly:(NSString *)assembly
+                                                       namespace:(NSString *)namespaceName
+                                                       className:(NSString *)className;
+
 - (nullable NSDictionary<NSString *, id> *)resolveMethodAssembly:(NSString *)assembly
                                                        namespace:(NSString *)namespaceName
                                                        className:(NSString *)className

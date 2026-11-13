@@ -676,11 +676,9 @@ static BOOL ZNIL2CPPParseMagnitude(NSString *text, uint64_t *value) {
     };
 }
 
-- (NSDictionary<NSString *,id> *)resolveMethodAssembly:(NSString *)assembly
+- (NSDictionary<NSString *,id> *)resolveClassAssembly:(NSString *)assembly
                                               namespace:(NSString *)namespaceName
-                                              className:(NSString *)className
-                                                 method:(NSString *)methodName
-                                          argumentCount:(NSInteger)argumentCount {
+                                              className:(NSString *)className {
     [self refresh];
     if (!self.available) return nil;
     const void *image = [self imageForAssembly:assembly];
@@ -691,7 +689,6 @@ static BOOL ZNIL2CPPParseMagnitude(NSString *text, uint64_t *value) {
 
     NSString *wantedNamespace = namespaceName ?: @"";
     NSString *wantedClass = className ?: @"";
-    NSString *wantedMethod = methodName ?: @"";
     void *klass = _classFromName(image, wantedNamespace.UTF8String, wantedClass.UTF8String);
     if (!klass && _imageGetClassCount && _imageGetClass && _classGetName && _classGetNamespace) {
         // The finder also enumerates classes when class_from_name cannot resolve one.
@@ -715,6 +712,23 @@ static BOOL ZNIL2CPPParseMagnitude(NSString *text, uint64_t *value) {
         self.lastError = [NSString stringWithFormat:@"找不到类：%@.%@", wantedNamespace, wantedClass];
         return nil;
     }
+
+    self.lastError = @"";
+    return @{@"image": @((uintptr_t)image), @"class": @((uintptr_t)klass)};
+}
+
+- (NSDictionary<NSString *,id> *)resolveMethodAssembly:(NSString *)assembly
+                                              namespace:(NSString *)namespaceName
+                                              className:(NSString *)className
+                                                 method:(NSString *)methodName
+                                          argumentCount:(NSInteger)argumentCount {
+    NSDictionary<NSString *, id> *resolvedClass = [self resolveClassAssembly:assembly
+                                                                      namespace:namespaceName
+                                                                      className:className];
+    if (!resolvedClass) return nil;
+    const void *image = (const void *)(uintptr_t)[resolvedClass[@"image"] unsignedLongLongValue];
+    void *klass = (void *)(uintptr_t)[resolvedClass[@"class"] unsignedLongLongValue];
+    NSString *wantedMethod = methodName ?: @"";
 
     const void *method = _classGetMethodFromName(klass, wantedMethod.UTF8String, (int)argumentCount);
     if (!method && _classGetMethods && _methodGetName && _methodGetParamCount) {
