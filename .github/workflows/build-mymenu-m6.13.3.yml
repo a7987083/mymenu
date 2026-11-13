@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - fix/method-finder-p2-class-refine
   workflow_dispatch:
 
 jobs:
