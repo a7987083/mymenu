@@ -14086,6 +14086,13 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 }
 
 - (void)zn52x_renderResultsAtWidth:(CGFloat)width {
+    // M6.14: M6.13.1 owns the final result IMP. Route class identities to
+    // their dedicated cards here, before the method-only candidate renderer.
+    // No additional swizzle and no change to the established method path.
+    if (ZNM64IsClassMode(self) && !objc_getAssociatedObject(self,kZNM64SelectedClassKey)) {
+        [self znm64_renderClassResultsAtWidth:width];
+        return;
+    }
     [self znm65_stopLiveHookStatusTimer];
     // M6.13.1: this method is the sole Result Card renderer.
     // Do NOT call the pre-swizzle renderer and then append views.
@@ -14107,7 +14114,11 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 
     CGFloat y=9.0;
     UIView *header=[self cardAtY:y height:48 width:width compact:NO];
-    UIButton *back=[self zn60v3_plainButton:@"‹ 搜索" selector:@selector(zn60v3_backToSearch:) frame:CGRectMake(10,8,70,31)];
+    // Drilling into a class must return to the class list, not exit search.
+    BOOL classMethods=ZNM64IsClassMode(self) && objc_getAssociatedObject(self,kZNM64SelectedClassKey)!=nil;
+    UIButton *back=[self zn60v3_plainButton:classMethods?@"‹ 类列表":@"‹ 搜索"
+        selector:classMethods?@selector(znm64_backToClasses:):@selector(zn60v3_backToSearch:)
+        frame:CGRectMake(10,8,70,31)];
     [header addSubview:back];
     NSString *countText=filter<0
         ? [NSString stringWithFormat:@"搜索结果（%lu）",(unsigned long)all.count]
