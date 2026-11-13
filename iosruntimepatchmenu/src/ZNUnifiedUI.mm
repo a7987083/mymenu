@@ -14170,10 +14170,12 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         BOOL instance=[analysis[@"instance"] boolValue];
         BOOL canCapture=[analysis[@"canCapture"] boolValue];
 
-        const CGFloat railW=190.0;
-        const CGFloat railGap=6.0;
-        const CGFloat rightInset=10.0;
-        const CGFloat topAreaH=140.0;
+        // P1: dedicate the full top of the card to identity, then place actions below.
+        // The former fixed 190pt side rail overlapped identity labels on narrow screens.
+        const CGFloat actionGap=6.0;
+        const CGFloat actionTop=125.0;
+        const CGFloat actionPitch=32.0;
+        const CGFloat topAreaH=actionTop+actionPitch*4.0+5.0;
         CGFloat paramH=argc?22.0+(CGFloat)argc*62.0:0.0;
         CGFloat statusBlockH=90.0;
         CGFloat cardH=topAreaH+paramH+statusBlockH+8.0;
@@ -14181,9 +14183,9 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         objc_setAssociatedObject(card,kZNM613AnalysisKey,analysis,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         objc_setAssociatedObject(card,kZNM613CardCandidateKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-        CGFloat leftW=MAX(120.0,CGRectGetWidth(card.bounds)-railW-rightInset-23.0);
+        CGFloat leftW=MAX(0.0,CGRectGetWidth(card.bounds)-26.0);
         UIButton *detail=[UIButton buttonWithType:UIButtonTypeCustom];
-        detail.frame=CGRectMake(0,0,leftW+12.0,topAreaH-6.0);
+        detail.frame=CGRectMake(0,0,CGRectGetWidth(card.bounds),actionTop-4.0);
         objc_setAssociatedObject(detail,kZNM54CandidateKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [detail addTarget:self action:@selector(znm54_openDetail:) forControlEvents:UIControlEventTouchUpInside];
         [card addSubview:detail];
@@ -14219,13 +14221,14 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         modeLabel.frame=CGRectMake(13,96,leftW-8,18);
         [card addSubview:modeLabel];
 
-        CGFloat colW=(railW-railGap)/2.0;
-        CGFloat x0=CGRectGetWidth(card.bounds)-rightInset-railW;
-        CGFloat x1=x0+colW+railGap;
+        // Two equal columns inside the card, never crossing the identity region.
+        CGFloat colW=MAX(0.0,(leftW-actionGap)/2.0);
+        CGFloat x0=13.0;
+        CGFloat x1=x0+colW+actionGap;
 
         UIButton *test=[self zn40_button:(canCapture?@"测试/捕获":@"测试执行")
                                 selector:@selector(znm613_testRuntime:)
-                                   frame:CGRectMake(x0,7,colW,27)];
+                                   frame:CGRectMake(x0,actionTop,colW,27)];
         objc_setAssociatedObject(test,ZNNativeHookCandidateAssociationKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         test.enabled=runtimeOK||canCapture;
         test.alpha=test.enabled?1.0:.48;
@@ -14242,7 +14245,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         BOOL installed=[diag containsString:@"已安装"];
         UIButton *apply=[self zn40_button:(installed?@"恢复 Hook":@"应用 Hook")
                                  selector:@selector(znm613_applyOrRestoreHook:)
-                                    frame:CGRectMake(x1,7,colW,27)];
+                                    frame:CGRectMake(x1,actionTop,colW,27)];
         objc_setAssociatedObject(apply,ZNNativeHookCandidateAssociationKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         apply.enabled=installed||hookOK;
         apply.alpha=apply.enabled?1.0:.48;
@@ -14250,7 +14253,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 
         UIButton *create=[self zn40_button:@"创建方法"
                                   selector:@selector(znm613_createCurrentMode:)
-                                     frame:CGRectMake(x0,39,colW,27)];
+                                     frame:CGRectMake(x0,actionTop+actionPitch,colW,27)];
         objc_setAssociatedObject(create,ZNNativeHookCandidateAssociationKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [card addSubview:create];
 
@@ -14258,7 +14261,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         NSInteger chainIndex=ZNM52XFindChain(candidate,&chainAction);
         UIButton *chain=[self zn40_button:(chainAction?@"执行链":@"链式调用")
                                  selector:(chainAction?@selector(zn52x_executeChainTapped:):@selector(znm613_chainTapped:))
-                                    frame:CGRectMake(x1,39,colW,27)];
+                                    frame:CGRectMake(x1,actionTop+actionPitch,colW,27)];
         if(chainAction){
             objc_setAssociatedObject(chain,kZNM52XActionKey,chainAction,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             objc_setAssociatedObject(chain,kZNM52XIndexKey,@(chainIndex),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -14273,7 +14276,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 
         UIButton *reselect=[self zn40_button:@"重新选择实例"
                                     selector:@selector(zn52x_reselectInstance:)
-                                       frame:CGRectMake(x0,71,colW,27)];
+                                       frame:CGRectMake(x0,actionTop+actionPitch*2.0,colW,27)];
         objc_setAssociatedObject(reselect,kZNM52XCandidateKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         reselect.enabled=known&&instance;
         reselect.alpha=reselect.enabled?1.0:.48;
@@ -14281,7 +14284,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 
         UIButton *batch=[self zn40_button:@"批量测试实例"
                                  selector:@selector(zn52x_batchTestInstances:)
-                                    frame:CGRectMake(x1,71,colW,27)];
+                                    frame:CGRectMake(x1,actionTop+actionPitch*2.0,colW,27)];
         objc_setAssociatedObject(batch,kZNM52XCandidateKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         batch.enabled=known&&instance&&ZNM52XBatchSafe(candidate);
         batch.alpha=batch.enabled?1.0:.48;
@@ -14289,14 +14292,14 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
 
         UIButton *direct=[self zn40_button:@"Native Call"
                                   selector:@selector(zn52x_directUnavailable:)
-                                     frame:CGRectMake(x0,103,colW,27)];
+                                     frame:CGRectMake(x0,actionTop+actionPitch*3.0,colW,27)];
         objc_setAssociatedObject(direct,ZNNativeHookCandidateAssociationKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         direct.accessibilityHint=directOK?@"Direct Native Call ABI supported":(directReason?:@"Direct Native Call unsupported");
         [card addSubview:direct];
 
         UIButton *hook=[self zn40_button:@"Native Hook"
                                 selector:@selector(zn64_hookTestTapped:)
-                                   frame:CGRectMake(x1,103,colW,27)];
+                                   frame:CGRectMake(x1,actionTop+actionPitch*3.0,colW,27)];
         objc_setAssociatedObject(hook,ZNNativeHookCandidateAssociationKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         hook.accessibilityHint=hookOK?@"Native Hook plan ready":(hookError?:@"Native Hook unsupported");
         [card addSubview:hook];
