@@ -12961,40 +12961,68 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     NSDictionary *abi=analysis[@"abi"];
     NSArray<NSDictionary *> *params=analysis[@"params"];
     NSDictionary *ret=[abi[@"return"] isKindOfClass:NSDictionary.class]?abi[@"return"]:@{};
-    NSMutableArray<NSString *> *lines = [NSMutableArray array];
-    [lines addObject:[NSString stringWithFormat:@"Assembly    %@", candidate[@"assembly"] ?: @"?"]];
-    [lines addObject:[NSString stringWithFormat:@"Namespace   %@", candidate[@"namespace"] ?: @""]];
-    [lines addObject:[NSString stringWithFormat:@"Class       %@", candidate[@"class"] ?: @"?"]];
-    [lines addObject:[NSString stringWithFormat:@"Method      %@/%@", candidate[@"method"] ?: @"?", candidate[@"argumentCount"] ?: @0]];
-    [lines addObject:[NSString stringWithFormat:@"RVA         %@", candidate[@"rvaText"] ?: @"—"]];
-    [lines addObject:[NSString stringWithFormat:@"MethodInfo  0x%llX", (unsigned long long)[candidate[@"methodInfo"] unsignedLongLongValue]]];
-    [lines addObject:[NSString stringWithFormat:@"Pointer     0x%llX", (unsigned long long)[candidate[@"methodPointer"] unsignedLongLongValue]]];
-    if ([ret[@"name"] isKindOfClass:NSString.class]) [lines addObject:[NSString stringWithFormat:@"Return      %@", ret[@"name"]]];
-    for (NSUInteger i = 0; i < params.count; i++) {
-        NSDictionary *p = params[i];
-        [lines addObject:[NSString stringWithFormat:@"Arg %-2lu     %@%@", (unsigned long)i, p[@"name"] ?: @"?", [p[@"byRef"] boolValue] ? @" &" : @""]];
+    // P5: keep display text and clipboard values separate. Never copy a
+    // formatted row string or modify the underlying IL2CPP candidate.
+    NSMutableArray<NSDictionary<NSString *,id> *> *fields=[NSMutableArray array];
+    void (^addField)(NSString *,NSString *,BOOL)=^(NSString *label,NSString *value,BOOL canCopy){
+        NSString *display=[value isKindOfClass:NSString.class]?value:@"";
+        [fields addObject:@{@"label":label,@"value":display,
+                            @"copyable":@(canCopy&&display.length&&![display isEqualToString:@"—"])}];
+    };
+    addField(@"Assembly",candidate[@"assembly"]?:@"",YES);
+    addField(@"Namespace",candidate[@"namespace"]?:@"",YES);
+    addField(@"Class",candidate[@"class"]?:@"",YES);
+    addField(@"Method",[NSString stringWithFormat:@"%@/%@",candidate[@"method"]?:@"?",candidate[@"argumentCount"]?:@0],YES);
+    addField(@"RVA",candidate[@"rvaText"]?:@"—",[candidate[@"addressResolved"] boolValue]);
+    unsigned long long methodInfo=[candidate[@"methodInfo"] unsignedLongLongValue];
+    unsigned long long methodPointer=[candidate[@"methodPointer"] unsignedLongLongValue];
+    addField(@"MethodInfo",methodInfo?[NSString stringWithFormat:@"0x%llX",methodInfo]:@"—",methodInfo!=0);
+    addField(@"Pointer",methodPointer?[NSString stringWithFormat:@"0x%llX",methodPointer]:@"—",methodPointer!=0);
+    if ([ret[@"name"] isKindOfClass:NSString.class]) addField(@"Return",ret[@"name"],YES);
+    for(NSUInteger i=0;i<params.count;i++){
+        NSDictionary *p=params[i];
+        addField([NSString stringWithFormat:@"Arg %lu",(unsigned long)i],
+                 [NSString stringWithFormat:@"%@%@",p[@"name"]?:@"?",[p[@"byRef"] boolValue]?@" &":@""],YES);
     }
     if ([candidate[@"ownershipKind"] isKindOfClass:NSString.class]) {
-        [lines addObject:[NSString stringWithFormat:@"Ownership   %@", candidate[@"ownershipKind"]]];
-        [lines addObject:[NSString stringWithFormat:@"Method RVA  %@", candidate[@"methodRVAText"] ?: @"—"]];
-        [lines addObject:[NSString stringWithFormat:@"Intra       %@", candidate[@"intraMethodOffsetText"] ?: @"+0x0"]];
+        addField(@"Ownership",candidate[@"ownershipKind"],YES);
+        addField(@"Method RVA",candidate[@"methodRVAText"]?:@"—",YES);
+        addField(@"Intra",candidate[@"intraMethodOffsetText"]?:@"+0x0",YES);
     }
 
-    CGFloat cardH = 34.0 + lines.count * 20.0;
-    UIView *card = [self cardAtY:y height:cardH width:width compact:NO];
-    UILabel *canonical = [self label:(candidate[@"canonical"] ?: @"IL2CPP Method") size:10.2 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
-    canonical.frame = CGRectMake(13, 7, card.bounds.size.width - 26, 20);
-    canonical.lineBreakMode = NSLineBreakByTruncatingMiddle;
+    CGFloat cardH=34.0+fields.count*30.0;
+    UIView *card=[self cardAtY:y height:cardH width:width compact:NO];
+    NSString *canonicalText=[candidate[@"canonical"] isKindOfClass:NSString.class]?candidate[@"canonical"]:@"IL2CPP Method";
+    UIButton *copyCanonical=[self zn60v3_plainButton:@"复制" selector:@selector(zn60v3_copyValue:)
+                                              frame:CGRectMake(card.bounds.size.width-55,5,42,23)];
+    copyCanonical.enabled=canonicalText.length>0;
+    objc_setAssociatedObject(copyCanonical,kZN60V3CopyValueKey,canonicalText,OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [card addSubview:copyCanonical];
+    UILabel *canonical=[self label:canonicalText size:10.2 weight:UIFontWeightSemibold color:self.theme.primaryTextColor];
+    canonical.frame=CGRectMake(13,7,MAX(0.0,card.bounds.size.width-75),20);
+    canonical.lineBreakMode=NSLineBreakByTruncatingMiddle;
     [card addSubview:canonical];
-    CGFloat ly = 31.0;
-    for (NSString *line in lines) {
-        UILabel *label = [self label:line size:8.4 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
-        label.frame = CGRectMake(13, ly, card.bounds.size.width - 26, 18);
-        label.font = [UIFont monospacedSystemFontOfSize:8.4 weight:UIFontWeightRegular];
-        label.adjustsFontSizeToFitWidth = YES;
-        label.minimumScaleFactor = 0.7;
+
+    CGFloat ly=32.0;
+    for(NSDictionary<NSString *,id> *field in fields){
+        NSString *fieldName=field[@"label"];
+        NSString *value=field[@"value"];
+        BOOL copyable=[field[@"copyable"] boolValue];
+        UILabel *label=[self label:[NSString stringWithFormat:@"%@    %@",fieldName,value.length?value:@"—"]
+                            size:8.4 weight:UIFontWeightRegular color:self.theme.secondaryTextColor];
+        label.frame=CGRectMake(13,ly,MAX(0.0,card.bounds.size.width-76),24);
+        label.font=[UIFont monospacedSystemFontOfSize:8.4 weight:UIFontWeightRegular];
+        label.lineBreakMode=NSLineBreakByTruncatingMiddle;
+        label.adjustsFontSizeToFitWidth=YES;
+        label.minimumScaleFactor=0.7;
         [card addSubview:label];
-        ly += 20.0;
+        UIButton *copy=[self zn60v3_plainButton:@"复制" selector:@selector(zn60v3_copyValue:)
+                                        frame:CGRectMake(card.bounds.size.width-55,ly+1,42,23)];
+        copy.enabled=copyable;
+        copy.alpha=copyable?1.0:0.4;
+        objc_setAssociatedObject(copy,kZN60V3CopyValueKey,value,OBJC_ASSOCIATION_COPY_NONATOMIC);
+        [card addSubview:copy];
+        ly+=30.0;
     }
     [self.contentView addSubview:card];
     y += cardH + 8.0;
