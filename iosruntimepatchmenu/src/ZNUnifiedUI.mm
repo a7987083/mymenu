@@ -12382,7 +12382,10 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
         NSString *token=NSUUID.UUID.UUIDString;
         objc_setAssociatedObject(self,kZNM64SearchTokenKey,token,OBJC_ASSOCIATION_COPY_NONATOMIC);
         objc_setAssociatedObject(self,kZNM64SelectedClassKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        NSString *assembly=[self znm43_selectedAssembly]?:@"";
+        // Match existing M4.4.2 semantics: default Assembly-CSharp is a
+        // priority hint, only an explicit user picker choice is a strict filter.
+        BOOL explicitAssembly=[objc_getAssociatedObject(self,kZNM442AssemblyExplicitKey) boolValue];
+        NSString *assembly=explicitAssembly?([self znm43_selectedAssembly]?:@""):@"";
         NSUInteger limit=[self zn60v3_limit];
         [self zn60v3_setStatus:@"正在查找类名…"];
         [self zn60v3_setPage:0];[self renderPage];
