@@ -384,6 +384,129 @@ static BOOL ZN60MethodMatches(ZN60Runtime *runtime,
 
 @implementation ZNIL2CPPHybridFinder (ZNMethodFinderV3Search)
 
+static NSInteger ZN64ClassRank(NSString *name, NSString *query) {
+    if (ZN60CaseEqual(name,query)) return 0;
+    NSString *n=name.lowercaseString, *q=query.lowercaseString;
+    if ([n hasPrefix:q]) return 1;
+    if ([n hasSuffix:q]) return 2;
+    return [n containsString:q] ? 3 : NSIntegerMax;
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)zn64_searchClasses:(NSString *)keyword
+                                                        assembly:(NSString *)assembly
+                                                           limit:(NSUInteger)limit
+                                                          cancel:(BOOL (^)(void))cancel
+                                                           error:(NSString **)error {
+    NSString *query=ZN60Trim(keyword);
+    if(!query.length){if(error)*error=@"请输入类名";return nil;}
+    limit=MAX((NSUInteger)1,MIN(limit?:kZN60DefaultLimit,kZN60HardLimit));
+    ZN60Runtime runtime={};
+    NSString *local=nil;
+    if(!ZN60LoadRuntime(&runtime,&local)){if(error)*error=local;return nil;}
+    size_t count=0;
+    const void **assemblies=ZN60Assemblies(&runtime,&count);
+    if(!assemblies||!count){ZN60CloseRuntime(&runtime);if(error)*error=@"IL2CPP Domain 尚无可用程序集";return nil;}
+    CFAbsoluteTime start=CFAbsoluteTimeGetCurrent();
+    NSMutableArray<NSDictionary<NSString *,id> *> *hits=[NSMutableArray array];
+    BOOL stopped=NO,limitHit=NO,timedOut=NO;
+    NSUInteger scanned=0;
+    // Do not stop early when the limit is reached: later classes may rank higher.
+    // Cap retained candidates to a bounded multiple of the visible result count.
+    NSUInteger cap=MIN((NSUInteger)4096,MAX(limit*4,(NSUInteger)64));
+    for(size_t a=0;a<count&&!stopped;a++){
+        const void *image=runtime.assemblyGetImage(assemblies[a]);
+        if(!image)continue;
+        NSString *assemblyName=ZN60String(runtime.imageGetName(image));
+        if(!ZN60AssemblyMatches(assemblyName,assembly))continue;
+        size_t classCount=runtime.imageGetClassCount(image);
+        for(size_t c=0;c<classCount;c++){
+            if((scanned++&63u)==0u){
+                if(cancel&&cancel()){stopped=YES;break;}
+                if(CFAbsoluteTimeGetCurrent()-start>=kZN60WallBudgetSeconds){timedOut=YES;stopped=YES;break;}
+            }
+            void *klass=runtime.imageGetClass(image,c);
+            if(!klass)continue;
+            NSString *name=ZN60String(runtime.classGetName(klass));
+            NSInteger rank=ZN64ClassRank(name,query);
+            if(rank==NSIntegerMax)continue;
+            NSString *ns=ZN60String(runtime.classGetNamespace(klass));
+            [hits addObject:@{@"assembly":assemblyName,@"namespace":ns,@"class":name,@"rank":@(rank)}];
+            if(hits.count>cap){
+                [hits sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){
+                    NSInteger ar=[a[@"rank"] integerValue],br=[b[@"rank"] integerValue];
+                    if(ar!=br)return ar<br?NSOrderedAscending:NSOrderedDescending;
+                    NSString *an=[NSString stringWithFormat:@"%@.%@",a[@"namespace"],a[@"class"]];
+                    NSString *bn=[NSString stringWithFormat:@"%@.%@",b[@"namespace"],b[@"class"]];
+                    return [an localizedCaseInsensitiveCompare:bn];
+                }];
+                [hits removeObjectsInRange:NSMakeRange(cap,hits.count-cap)];
+                limitHit=YES;
+            }
+        }
+    }
+    ZN60CloseRuntime(&runtime);
+    if(cancel&&cancel()){if(error)*error=@"搜索已取消";return nil;}
+    [hits sortUsingComparator:^NSComparisonResult(NSDictionary *a,NSDictionary *b){
+        NSInteger ar=[a[@"rank"] integerValue],br=[b[@"rank"] integerValue];
+        if(ar!=br)return ar<br?NSOrderedAscending:NSOrderedDescending;
+        NSString *an=[NSString stringWithFormat:@"%@.%@",a[@"namespace"],a[@"class"]];
+        NSString *bn=[NSString stringWithFormat:@"%@.%@",b[@"namespace"],b[@"class"]];
+        NSComparisonResult r=[an localizedCaseInsensitiveCompare:bn];
+        return r==NSOrderedSame?[a[@"assembly"] localizedCaseInsensitiveCompare:b[@"assembly"]]:r;
+    }];
+    if(hits.count>limit){[hits removeObjectsInRange:NSMakeRange(limit,hits.count-limit)];limitHit=YES;}
+    if(!hits.count){if(error)*error=timedOut?@"搜索时间预算已用尽，未发现匹配类":@"未发现匹配类";return nil;}
+    NSMutableArray *result=[NSMutableArray arrayWithCapacity:hits.count];
+    for(NSDictionary *entry in hits){
+        NSMutableDictionary *item=[entry mutableCopy];
+        item[@"truncated"]=@(timedOut||limitHit);
+        item[@"classesScanned"]=@(scanned);
+        [result addObject:[item copy]];
+    }
+    return result;
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)zn64_methodsForClass:(NSDictionary<NSString *, id> *)identity
+                                                             limit:(NSUInteger)limit
+                                                            cancel:(BOOL (^)(void))cancel
+                                                             error:(NSString **)error {
+    NSString *assembly=identity[@"assembly"], *ns=identity[@"namespace"], *name=identity[@"class"];
+    if(!assembly.length||!name.length){if(error)*error=@"类标识无效";return nil;}
+    limit=MAX((NSUInteger)1,MIN(limit?:kZN60DefaultLimit,kZN60HardLimit));
+    ZN60Runtime runtime={};
+    NSString *local=nil;
+    if(!ZN60LoadRuntime(&runtime,&local)){if(error)*error=local;return nil;}
+    size_t count=0;const void **assemblies=ZN60Assemblies(&runtime,&count);
+    NSMutableArray *items=[NSMutableArray array];
+    for(size_t a=0;a<count;a++){
+        if(cancel&&cancel())break;
+        const void *image=runtime.assemblyGetImage(assemblies[a]);
+        if(!image||!ZN60AssemblyMatches(ZN60String(runtime.imageGetName(image)),assembly))continue;
+        void *klass=runtime.classFromName?runtime.classFromName(image,(ns?:@"").UTF8String,name.UTF8String):NULL;
+        if(!klass){
+            for(size_t c=0;c<runtime.imageGetClassCount(image);c++){
+                void *candidate=runtime.imageGetClass(image,c);
+                if(candidate&&ZN60CaseEqual(ZN60String(runtime.classGetName(candidate)),name)&&
+                   ZN60CaseEqual(ZN60String(runtime.classGetNamespace(candidate)),ns?:@"")){klass=candidate;break;}
+            }
+        }
+        if(!klass)continue;
+        void *iterator=NULL;const void *method=NULL;
+        while((method=runtime.classGetMethods(klass,&iterator))!=NULL && items.count<limit){
+            if(cancel&&cancel())break;
+            NSString *methodName=ZN60String(runtime.methodGetName(method));
+            NSInteger argc=runtime.methodGetParamCount?(NSInteger)runtime.methodGetParamCount(method):-1;
+            [items addObject:ZN60Candidate(&runtime,method,assembly,ns?:@"",name,methodName,argc,0)];
+        }
+        break;
+    }
+    ZN60CloseRuntime(&runtime);
+    if(cancel&&cancel()){if(error)*error=@"搜索已取消";return nil;}
+    if(!items.count){if(error)*error=@"该类没有可枚举的方法";return nil;}
+    return items;
+}
+
+
 - (NSArray<NSDictionary<NSString *,id> *> *)zn60_searchCandidates:(NSString *)expression
                                                              limit:(NSUInteger)limit
                                                              error:(NSString **)error {
