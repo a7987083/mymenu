@@ -5,11 +5,6 @@
 #import "ZNPatchCore.h"
 #import <objc/runtime.h>
 
-typedef void *(*ZNM44DomainGetFn)(void);
-typedef const void **(*ZNM44DomainGetAssembliesFn)(const void *, size_t *);
-typedef const void *(*ZNM44AssemblyGetImageFn)(const void *);
-typedef const char *(*ZNM44ImageGetNameFn)(const void *);
-typedef void *(*ZNM44ClassFromNameFn)(const void *, const char *, const char *);
 typedef void *(*ZNM44ObjectGetClassFn)(void *);
 typedef bool (*ZNM44ClassAssignableFn)(void *, void *);
 
@@ -20,48 +15,21 @@ static NSMutableDictionary<NSString *, NSNumber *> *ZNM44SelectionStore(void) {
     return store;
 }
 
-static NSString *ZNM44String(const char *raw) {
-    if (!raw) return @"";
-    NSString *value = [NSString stringWithUTF8String:raw];
-    return value ?: @"";
-}
-
 static void *ZNM44ResolveClass(NSString *assembly,
                                NSString *namespaceName,
                                NSString *className,
                                NSString **error) {
     ZNIL2CPPResolver *resolver = [ZNIL2CPPResolver sharedResolver];
-    [resolver refresh];
-    if (!resolver.isAvailable) {
-        if (error) *error = resolver.lastError ?: @"IL2CPP Resolver unavailable";
+    NSDictionary<NSString *, id> *resolved = [resolver resolveClassAssembly:assembly
+                                                                 namespace:namespaceName ?: @""
+                                                                 className:className ?: @""];
+    if (!resolved) {
+        if (error) *error = resolver.lastError.length ? resolver.lastError : @"目标 Class 无法解析";
         return NULL;
     }
-    NSString *path = resolver.unityPath ?: @"";
-    ZNM44DomainGetFn domainGet = (ZNM44DomainGetFn)ZNIL2CPPResolveSymbol(path, "il2cpp_domain_get");
-    ZNM44DomainGetAssembliesFn getAssemblies = (ZNM44DomainGetAssembliesFn)ZNIL2CPPResolveSymbol(path, "il2cpp_domain_get_assemblies");
-    ZNM44AssemblyGetImageFn getImage = (ZNM44AssemblyGetImageFn)ZNIL2CPPResolveSymbol(path, "il2cpp_assembly_get_image");
-    ZNM44ImageGetNameFn getName = (ZNM44ImageGetNameFn)ZNIL2CPPResolveSymbol(path, "il2cpp_image_get_name");
-    ZNM44ClassFromNameFn classFromName = (ZNM44ClassFromNameFn)ZNIL2CPPResolveSymbol(path, "il2cpp_class_from_name");
-    if (!domainGet || !getAssemblies || !getImage || !getName || !classFromName) {
-        if (error) *error = @"缺少 IL2CPP class validation API";
-        return NULL;
-    }
-    void *domain = domainGet();
-    size_t count = 0;
-    const void **assemblies = domain ? getAssemblies(domain, &count) : NULL;
-    NSString *wanted = ZNIL2CPPNormalizedAssembly(assembly);
-    for (size_t i = 0; assemblies && i < count; i++) {
-        const void *image = getImage(assemblies[i]);
-        if (!image) continue;
-        NSString *imageName = ZNM44String(getName(image));
-        if (wanted.length && ![ZNIL2CPPNormalizedAssembly(imageName) isEqualToString:wanted]) continue;
-        void *klass = classFromName(image,
-                                    (namespaceName ?: @"").UTF8String ?: "",
-                                    (className ?: @"").UTF8String ?: "");
-        if (klass) return klass;
-    }
-    if (error) *error = [NSString stringWithFormat:@"Class 不存在：%@!%@.%@", assembly ?: @"", namespaceName ?: @"", className ?: @""];
-    return NULL;
+    uintptr_t klass = [resolved[@"class"] unsignedLongLongValue];
+    if (!klass && error) *error = @"目标 Class 地址为空";
+    return (void *)klass;
 }
 
 @interface ZNIL2CPPInstanceResolver (ZNInstanceSelectionV2Private)
