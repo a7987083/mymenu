@@ -9205,6 +9205,8 @@ static void ZNM44EnsureInstance(ZNRuntimeMenuControllerV040 *controller,
         return;
     }
     ZNRuntimeMethodActionRecord *record = runtime.records[(NSUInteger)index];
+    // Authored ordinal bypasses the legacy class-wide instance picker.
+    if (record.instanceIndex) { [self znm44_executeAction:sender]; return; }
     BOOL known = NO;
     BOOL isStatic = ZNM44MethodIsStatic(record.assembly,
                                         record.namespaceName,
@@ -11867,6 +11869,7 @@ static NSDictionary *ZN49ExecuteRecordWithValues(ZNRuntimeMethodActionRecord *re
     action.className = record.className;
     action.methodName = record.methodName;
     action.argumentCount = record.argumentCount;
+    action.instanceIndex = record.instanceIndex;
     action.argumentValues = values ?: @[];
     action.parameterTypeNames = record.parameterTypeNames ?: @[];
     action.signatureAvailable = record.signatureAvailable;
@@ -13480,7 +13483,7 @@ static NSString *ZN51ValueKey(uint32_t actionID, NSUInteger arg) {
     }
     ZNRuntimeMethodAction *action = [ZNRuntimeMethodAction new];
     action.actionID = record.actionID; action.title = record.title; action.group = record.group; action.assembly = record.assembly; action.namespaceName = record.namespaceName; action.className = record.className; action.methodName = record.methodName;
-    action.argumentCount = record.argumentCount; action.argumentValues = values; action.parameterTypeNames = record.parameterTypeNames; action.signatureAvailable = record.signatureAvailable; action.argumentControlConfigs = record.argumentControlConfigs; action.immediateChain = record.immediateChain;
+    action.argumentCount = record.argumentCount; action.instanceIndex = record.instanceIndex; action.argumentValues = values; action.parameterTypeNames = record.parameterTypeNames; action.signatureAvailable = record.signatureAvailable; action.argumentControlConfigs = record.argumentControlConfigs; action.immediateChain = record.immediateChain;
     NSString *error = nil;
     NSDictionary *result = [[ZNIL2CPPInvokeEngine sharedEngine] executeAction:action error:&error];
     UIViewController *top = ZN51Top(self.hostWindow);
@@ -13639,6 +13642,7 @@ static NSString *ZN51SValueForControl(ZNRuntimeMenuControllerV040 *controller,
     action.className = record.className;
     action.methodName = record.methodName;
     action.argumentCount = record.argumentCount;
+    action.instanceIndex = record.instanceIndex;
     action.argumentValues = values;
     action.parameterTypeNames = record.parameterTypeNames;
     action.signatureAvailable = record.signatureAvailable;
@@ -17626,6 +17630,7 @@ static void ZNM582StoreValues(ZNRuntimeMethodActionRecord *record, NSArray<NSStr
     action.className = record.className;
     action.methodName = record.methodName;
     action.argumentCount = record.argumentCount;
+    action.instanceIndex = record.instanceIndex;
     action.argumentValues = values;
     action.parameterTypeNames = record.parameterTypeNames;
     action.signatureAvailable = record.signatureAvailable;
