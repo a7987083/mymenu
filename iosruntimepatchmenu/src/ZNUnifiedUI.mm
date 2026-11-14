@@ -15159,8 +15159,8 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     NSString *cls=ZNM52XString(candidate[@"class"]);
     ZNIL2CPPInstanceResolver *resolver=[ZNIL2CPPInstanceResolver sharedResolver];
 
+    // Keep the previous selection until the new receiver passes validation and binds.
     uintptr_t previous=[resolver znm44_selectedInstanceForAssembly:assembly namespace:ns className:cls];
-    [resolver znm44_clearSelectedInstanceForAssembly:assembly namespace:ns className:cls];
 
     NSString *diag=nil,*findError=nil;
     NSArray<NSNumber *> *instances=[resolver candidateAddressesForAssembly:assembly namespace:ns className:cls limit:32 diagnostics:&diag error:&findError];
@@ -15171,7 +15171,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     }
 
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"重新选择实例 · %@",cls.length?cls:@"Object"]
-                                                                 message:[NSString stringWithFormat:@"发现 %lu 个活实例；旧 GCHandle 已释放",(unsigned long)instances.count]
+                                                                 message:[NSString stringWithFormat:@"发现 %lu 个活实例；选择成功后替换当前绑定",(unsigned long)instances.count]
                                                           preferredStyle:UIAlertControllerStyleActionSheet];
     __weak typeof(self) weakSelf=self;
     for(NSUInteger i=0;i<instances.count;i++){
@@ -15188,7 +15188,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *a){
-        ZNM613SetCandidateStatus(weakSelf,candidate,@"已取消重新选择；旧 receiver 已释放");
+        ZNM613SetCandidateStatus(weakSelf,candidate,@"已取消重新选择；当前绑定保持不变");
         [weakSelf renderPage];
     }]];
 
