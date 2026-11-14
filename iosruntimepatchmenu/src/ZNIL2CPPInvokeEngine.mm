@@ -146,6 +146,34 @@ static NSString *ZNInvokeParameterReason(NSDictionary *param) {
         if (error) *error = @"Runtime Method Call action 为空";
         return nil;
     }
+    // Explicit receiver calls reuse this method via executeAction:receiver:error:.
+    // Never re-enumerate when the caller already supplied a validated receiver.
+    if (action.instanceIndex && !gZNExplicitReceiverOverride) {
+        if (action.instanceIndex > 128 || action.executionKind != ZNRuntimeExecutionKindMethodCall) {
+            if (error) *error = @"FAILED_INSTANCE_INDEX：实例序号或方法类型无效";
+            return nil;
+        }
+        NSString *diagnostics = nil, *resolveError = nil;
+        NSArray<NSNumber *> *instances = [[ZNIL2CPPInstanceResolver sharedResolver]
+            candidateAddressesForAssembly:action.assembly
+                               namespace:action.namespaceName
+                               className:action.className
+                                   limit:128
+                             diagnostics:&diagnostics
+                                   error:&resolveError];
+        if (instances.count < action.instanceIndex) {
+            if (error) *error = resolveError ?: [NSString stringWithFormat:
+                @"FAILED_INSTANCE_INDEX：指定实例 %lu，当前发现 %lu 个；枚举序号不保证跨重启稳定",
+                (unsigned long)action.instanceIndex, (unsigned long)instances.count];
+            return nil;
+        }
+        uintptr_t receiver = (uintptr_t)[instances[action.instanceIndex-1] unsignedLongLongValue];
+        if (!receiver) {
+            if (error) *error = @"FAILED_INSTANCE_INDEX：实例地址无效";
+            return nil;
+        }
+        return [self executeAction:action receiver:receiver error:error];
+    }
     return [self executeAssembly:action.assembly
                        namespace:action.namespaceName
                        className:action.className
