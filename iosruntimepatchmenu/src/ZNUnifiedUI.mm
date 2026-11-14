@@ -7093,6 +7093,7 @@ static const NSInteger kZNRMCBuilderDeleteTagBase = 671000;
 static const NSInteger kZNRMCBuilderTitleTagBase = 672000;
 static const NSInteger kZNRMCBuilderArgumentTagBase = 674000;
 static const NSInteger kZNRMCBuilderDescriptionTagBase = 675000;
+static const NSInteger kZNRMCBuilderInstanceTagBase = 677000;
 static const NSInteger kZNNativeHookDeleteTagBase = 676000;
 
 static CGFloat ZNRMCBuilderMaxY(UIView *view) {
@@ -7162,6 +7163,7 @@ static UITextField *ZNRMCBuilderTextField(CGRect frame, ZNTheme *theme) {
 - (void)znrmc_deleteAuthoringAction:(UIButton *)sender;
 - (void)znrmc_titleEditingEnded:(UITextField *)field;
 - (void)znrmc_descriptionEditingEnded:(UITextField *)field;
+- (void)znrmc_instanceEditingEnded:(UITextField *)field;
 - (void)znrmc_argumentEditingChanged:(UITextField *)field;
 - (void)znrmc_argumentEditingEnded:(UITextField *)field;
 - (void)zn64_deleteNativeHook:(UIButton *)sender;
@@ -7206,7 +7208,8 @@ static UITextField *ZNRMCBuilderTextField(CGRect frame, ZNTheme *theme) {
         for (NSUInteger i = 0; i < actions.count; i++) {
             ZNRuntimeMethodAction *action = actions[i];
             BOOL hasArgument = action.argumentCount == 1;
-            CGFloat cardH = hasArgument ? 149.0 : 109.0;
+            BOOL hasInstanceConfig = action.executionKind == ZNRuntimeExecutionKindMethodCall;
+            CGFloat cardH = (hasArgument ? 149.0 : 109.0) + (hasInstanceConfig ? 44.0 : 0.0);
             UIView *card = [self cardAtY:y height:cardH width:width compact:NO];
 
             UITextField *name = ZNRMCBuilderTextField(CGRectMake(13, 7, card.bounds.size.width - 82, 27), self.theme);
@@ -7250,6 +7253,23 @@ static UITextField *ZNRMCBuilderTextField(CGRect frame, ZNTheme *theme) {
                 [argument addTarget:self action:@selector(znrmc_argumentEditingChanged:) forControlEvents:UIControlEventEditingChanged];
                 [argument addTarget:self action:@selector(znrmc_argumentEditingEnded:) forControlEvents:UIControlEventEditingDidEndOnExit | UIControlEventEditingDidEnd];
                 [card addSubview:argument];
+            }
+
+            if (hasInstanceConfig) {
+                CGFloat instanceY = hasArgument ? 141.0 : 101.0;
+                UILabel *instanceLabel = [self label:@"实例" size:9.1 weight:UIFontWeightMedium color:self.theme.secondaryTextColor];
+                instanceLabel.frame = CGRectMake(13, instanceY, 35, 28);
+                [card addSubview:instanceLabel];
+
+                UITextField *instance = ZNRMCBuilderTextField(CGRectMake(52, instanceY, card.bounds.size.width - 65, 28), self.theme);
+                instance.tag = kZNRMCBuilderInstanceTagBase + (NSInteger)i;
+                instance.text = action.instanceIndex ? [NSString stringWithFormat:@"%lu", (unsigned long)action.instanceIndex] : @"";
+                instance.placeholder = @"自动（留空）／指定序号 1–128";
+                instance.keyboardType = UIKeyboardTypeNumberPad;
+                instance.font = [UIFont monospacedDigitSystemFontOfSize:9.6 weight:UIFontWeightMedium];
+                [instance addTarget:self action:@selector(znrmc_instanceEditingEnded:)
+                      forControlEvents:UIControlEventEditingDidEndOnExit | UIControlEventEditingDidEnd];
+                [card addSubview:instance];
             }
 
             [self.contentView addSubview:card];
@@ -7359,6 +7379,29 @@ static UITextField *ZNRMCBuilderTextField(CGRect frame, ZNTheme *theme) {
     [[ZNRuntimeActionStore sharedStore] updateFeatureDescription:field.text atIndex:(NSUInteger)index error:&error];
     NSArray<ZNRuntimeMethodAction *> *actions = [[ZNRuntimeActionStore sharedStore] actionsSnapshot];
     if ((NSUInteger)index < actions.count) field.text = actions[(NSUInteger)index].featureDescription ?: @"";
+    [field resignFirstResponder];
+}
+
+- (void)znrmc_instanceEditingEnded:(UITextField *)field {
+    NSInteger index = field.tag - kZNRMCBuilderInstanceTagBase;
+    if (index < 0) return;
+    NSString *raw = [field.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @"";
+    NSCharacterSet *digits = NSCharacterSet.decimalDigitCharacterSet;
+    BOOL valid = !raw.length || ([raw rangeOfCharacterFromSet:digits.invertedSet].location == NSNotFound && raw.length <= 3);
+    NSUInteger requested = valid && raw.length ? (NSUInteger)raw.integerValue : 0;
+    if (raw.length && (!valid || requested < 1 || requested > 128)) {
+        [[ZNRuntimeLogger sharedLogger] log:@"[runtime-authoring] 实例序号无效，请输入 1–128 或留空"];
+    } else {
+        NSString *error = nil;
+        if (![[ZNRuntimeActionStore sharedStore] updateInstanceIndex:requested atIndex:(NSUInteger)index error:&error]) {
+            [[ZNRuntimeLogger sharedLogger] log:[NSString stringWithFormat:@"[runtime-authoring] 更新实例配置失败：%@", error ?: @"unknown"]];
+        }
+    }
+    NSArray<ZNRuntimeMethodAction *> *actions = [[ZNRuntimeActionStore sharedStore] actionsSnapshot];
+    if ((NSUInteger)index < actions.count) {
+        NSUInteger saved = actions[(NSUInteger)index].instanceIndex;
+        field.text = saved ? [NSString stringWithFormat:@"%lu", (unsigned long)saved] : @"";
+    }
     [field resignFirstResponder];
 }
 

@@ -21,7 +21,8 @@ static NSDictionary *ZNM551EncodeAction(ZNRuntimeMethodAction *a) {
         @"parameterTypeNames": a.parameterTypeNames ?: @[],
         @"signatureAvailable": @(a.signatureAvailable),
         @"argumentControlConfigs": a.argumentControlConfigs ?: @[],
-        @"immediateChain": a.immediateChain ?: @{}
+        @"immediateChain": a.immediateChain ?: @{},
+        @"instanceIndex": @(a.instanceIndex)
     };
 }
 
@@ -80,6 +81,11 @@ static void ZNM551Restore(void) {
         if (chain.count) [[ZNRuntimeActionStore sharedStore] updateImmediateChain:chain atIndex:index error:nil];
         if ([item[@"description"] isKindOfClass:NSString.class])
             [[ZNRuntimeActionStore sharedStore] updateFeatureDescription:item[@"description"] atIndex:index error:nil];
+        if ([item[@"instanceIndex"] isKindOfClass:NSNumber.class] &&
+            [item[@"instanceIndex"] unsignedIntegerValue] <= 128 &&
+            created.executionKind == ZNRuntimeExecutionKindMethodCall) {
+            [store updateInstanceIndex:[item[@"instanceIndex"] unsignedIntegerValue] atIndex:index error:nil];
+        }
         restored++;
     }
     gZNM551Restoring = NO;
@@ -93,6 +99,7 @@ static void ZNM551Restore(void) {
 - (BOOL)znm551_updateArgumentValues:(NSArray<NSString *> *)argumentValues atIndex:(NSUInteger)index error:(NSString **)error;
 - (BOOL)znm551_updateArgumentControlConfigs:(NSArray<NSDictionary<NSString *, id> *> *)configs atIndex:(NSUInteger)index error:(NSString **)error;
 - (BOOL)znm551_updateImmediateChain:(NSDictionary<NSString *, id> *)chain atIndex:(NSUInteger)index error:(NSString **)error;
+- (BOOL)znm551_updateInstanceIndex:(NSUInteger)instanceIndex atIndex:(NSUInteger)index error:(NSString **)error;
 - (BOOL)znm551_removeActionAtIndex:(NSUInteger)index;
 - (void)znm551_clear;
 @end
@@ -108,6 +115,11 @@ static void ZNM551Restore(void) {
 - (BOOL)znm551_updateArgumentValues:(NSArray<NSString *> *)argumentValues atIndex:(NSUInteger)index error:(NSString **)error { BOOL ok=[self znm551_updateArgumentValues:argumentValues atIndex:index error:error]; if(ok) ZNM551Save(); return ok; }
 - (BOOL)znm551_updateArgumentControlConfigs:(NSArray<NSDictionary<NSString *,id> *> *)configs atIndex:(NSUInteger)index error:(NSString **)error { BOOL ok=[self znm551_updateArgumentControlConfigs:configs atIndex:index error:error]; if(ok) ZNM551Save(); return ok; }
 - (BOOL)znm551_updateImmediateChain:(NSDictionary<NSString *,id> *)chain atIndex:(NSUInteger)index error:(NSString **)error { BOOL ok=[self znm551_updateImmediateChain:chain atIndex:index error:error]; if(ok) ZNM551Save(); return ok; }
+- (BOOL)znm551_updateInstanceIndex:(NSUInteger)instanceIndex atIndex:(NSUInteger)index error:(NSString **)error {
+    BOOL ok = [self znm551_updateInstanceIndex:instanceIndex atIndex:index error:error];
+    if (ok) ZNM551Save();
+    return ok;
+}
 - (BOOL)znm551_removeActionAtIndex:(NSUInteger)index { BOOL ok=[self znm551_removeActionAtIndex:index]; if(ok) ZNM551Save(); return ok; }
 - (void)znm551_clear { [self znm551_clear]; ZNM551Save(); }
 @end
@@ -128,6 +140,7 @@ extern "C" void ZNInstallM551AuthoringPersistenceDeferred(void) {
         ZNM551Swap(cls, @selector(updateArgumentValues:atIndex:error:), @selector(znm551_updateArgumentValues:atIndex:error:));
         ZNM551Swap(cls, @selector(updateArgumentControlConfigs:atIndex:error:), @selector(znm551_updateArgumentControlConfigs:atIndex:error:));
         ZNM551Swap(cls, @selector(updateImmediateChain:atIndex:error:), @selector(znm551_updateImmediateChain:atIndex:error:));
+        ZNM551Swap(cls, @selector(updateInstanceIndex:atIndex:error:), @selector(znm551_updateInstanceIndex:atIndex:error:));
         ZNM551Swap(cls, @selector(removeActionAtIndex:), @selector(znm551_removeActionAtIndex:));
         ZNM551Swap(cls, @selector(clear), @selector(znm551_clear));
         [[ZNRuntimeLogger sharedLogger] log:@"[m5.5.1-persist] authoring persistence installed"];

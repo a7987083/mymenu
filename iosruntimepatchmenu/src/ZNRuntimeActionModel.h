@@ -42,6 +42,8 @@ FOUNDATION_EXPORT ZNRuntimeArgumentControlType ZNRuntimeArgumentControlTypeFromK
 // M5.1 Immediate Chain. Empty means no chain. V1 stores a complete target
 // method descriptor and never persists a returned object address/GCHandle.
 @property(nonatomic,copy) NSDictionary<NSString *, id> *immediateChain;
+// Authoring only: 0 = auto, 1..128 = liveness enumeration index (not persistent identity).
+@property(nonatomic,assign) NSUInteger instanceIndex;
 @property(nonatomic,copy,readonly) NSString *canonicalIdentity;
 @property(nonatomic,copy,readonly) NSString *legacyCanonicalIdentity;
 @end
@@ -76,6 +78,7 @@ FOUNDATION_EXPORT ZNRuntimeArgumentControlType ZNRuntimeArgumentControlTypeFromK
 - (BOOL)updateImmediateChain:(nullable NSDictionary<NSString *, id> *)chain
                      atIndex:(NSUInteger)index
                        error:(NSString * _Nullable * _Nullable)error;
+- (BOOL)updateInstanceIndex:(NSUInteger)instanceIndex atIndex:(NSUInteger)index error:(NSString * _Nullable * _Nullable)error;
 - (BOOL)removeActionAtIndex:(NSUInteger)index;
 - (void)clear;
 - (NSArray<ZNRuntimeMethodAction *> *)actionsSnapshot;
