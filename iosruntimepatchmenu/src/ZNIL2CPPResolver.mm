@@ -676,11 +676,9 @@ static BOOL ZNIL2CPPParseMagnitude(NSString *text, uint64_t *value) {
     };
 }
 
-- (NSDictionary<NSString *,id> *)resolveMethodAssembly:(NSString *)assembly
+- (NSDictionary<NSString *,id> *)resolveClassAssembly:(NSString *)assembly
                                               namespace:(NSString *)namespaceName
-                                              className:(NSString *)className
-                                                 method:(NSString *)methodName
-                                          argumentCount:(NSInteger)argumentCount {
+                                              className:(NSString *)className {
     [self refresh];
     if (!self.available) return nil;
     const void *image = [self imageForAssembly:assembly];
@@ -689,17 +687,67 @@ static BOOL ZNIL2CPPParseMagnitude(NSString *text, uint64_t *value) {
         return nil;
     }
 
-    void *klass = _classFromName(image,
-                                 (namespaceName ?: @"").UTF8String,
-                                 (className ?: @"").UTF8String);
+    NSString *wantedNamespace = namespaceName ?: @"";
+    NSString *wantedClass = className ?: @"";
+    void *klass = _classFromName(image, wantedNamespace.UTF8String, wantedClass.UTF8String);
+    if (!klass && _imageGetClassCount && _imageGetClass && _classGetName && _classGetNamespace) {
+        // The finder also enumerates classes when class_from_name cannot resolve one.
+        // Require a unique match; never silently bind a different class.
+        size_t count = _imageGetClassCount(image);
+        for (size_t i = 0; i < count; i++) {
+            void *candidate = _imageGetClass(image, i);
+            if (!candidate) continue;
+            NSString *name = ZNIL2CPPString(_classGetName(candidate));
+            NSString *ns = ZNIL2CPPString(_classGetNamespace(candidate));
+            if ([name caseInsensitiveCompare:wantedClass] != NSOrderedSame ||
+                [ns caseInsensitiveCompare:wantedNamespace] != NSOrderedSame) continue;
+            if (klass && klass != candidate) {
+                self.lastError = [NSString stringWithFormat:@"类匹配不唯一：%@.%@", wantedNamespace, wantedClass];
+                return nil;
+            }
+            klass = candidate;
+        }
+    }
     if (!klass) {
-        self.lastError = [NSString stringWithFormat:@"找不到类：%@.%@", namespaceName ?: @"", className ?: @""];
+        self.lastError = [NSString stringWithFormat:@"找不到类：%@.%@", wantedNamespace, wantedClass];
         return nil;
     }
 
-    const void *method = _classGetMethodFromName(klass, (methodName ?: @"").UTF8String, (int)argumentCount);
+    self.lastError = @"";
+    return @{@"image": @((uintptr_t)image), @"class": @((uintptr_t)klass)};
+}
+
+- (NSDictionary<NSString *,id> *)resolveMethodAssembly:(NSString *)assembly
+                                              namespace:(NSString *)namespaceName
+                                              className:(NSString *)className
+                                                 method:(NSString *)methodName
+                                          argumentCount:(NSInteger)argumentCount {
+    NSDictionary<NSString *, id> *resolvedClass = [self resolveClassAssembly:assembly
+                                                                      namespace:namespaceName
+                                                                      className:className];
+    if (!resolvedClass) return nil;
+    const void *image = (const void *)(uintptr_t)[resolvedClass[@"image"] unsignedLongLongValue];
+    void *klass = (void *)(uintptr_t)[resolvedClass[@"class"] unsignedLongLongValue];
+    NSString *wantedMethod = methodName ?: @"";
+
+    const void *method = _classGetMethodFromName(klass, wantedMethod.UTF8String, (int)argumentCount);
+    if (!method && _classGetMethods && _methodGetName && _methodGetParamCount) {
+        // Match the finder's enumeration path; reject ambiguous overloads.
+        void *iterator = NULL;
+        const void *candidate = NULL;
+        while ((candidate = _classGetMethods(klass, &iterator)) != NULL) {
+            NSString *name = ZNIL2CPPString(_methodGetName(candidate));
+            if ([name caseInsensitiveCompare:wantedMethod] != NSOrderedSame ||
+                (NSInteger)_methodGetParamCount(candidate) != argumentCount) continue;
+            if (method && method != candidate) {
+                self.lastError = [NSString stringWithFormat:@"方法匹配不唯一：%@/%ld", wantedMethod, (long)argumentCount];
+                return nil;
+            }
+            method = candidate;
+        }
+    }
     if (!method) {
-        self.lastError = [NSString stringWithFormat:@"找不到方法：%@/%ld", methodName ?: @"", (long)argumentCount];
+        self.lastError = [NSString stringWithFormat:@"找不到方法：%@/%ld", wantedMethod, (long)argumentCount];
         return nil;
     }
 
