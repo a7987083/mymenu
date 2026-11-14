@@ -13,6 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,copy,readonly) NSString *className;
 @property(nonatomic,copy,readonly) NSString *methodName;
 @property(nonatomic,assign,readonly) NSUInteger argumentCount;
+@property(nonatomic,assign,readonly) NSUInteger instanceIndex;
 @property(nonatomic,copy,readonly) NSArray<NSString *> *argumentValues;
 @property(nonatomic,copy,readonly) NSArray<NSString *> *parameterTypeNames;
 @property(nonatomic,assign,readonly) BOOL signatureAvailable;

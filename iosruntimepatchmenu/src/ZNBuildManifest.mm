@@ -220,7 +220,7 @@ static BOOL ZNM69EmitRuntimeActionTable(ZNBuildManifest *manifest,
             NSArray<ZNRuntimeMethodAction *> *actions=[[ZNRuntimeActionStore sharedStore] actionsSnapshot];
             [actions enumerateObjectsUsingBlock:^(ZNRuntimeMethodAction *action, NSUInteger idx, BOOL *stop) {
                 (void)stop;
-                NSString *identity=action.canonicalIdentity.length?action.canonicalIdentity:[NSString stringWithFormat:@"runtime:%lu",(unsigned long)idx];
+                NSString *identity=[NSString stringWithFormat:@"runtime-action:%u",action.actionID];
                 [items addObject:[ZNBuildItem itemWithProvider:@"runtime-method-call"
                                                           kind:@"runtime-method"
                                                     identifier:identity

@@ -30,7 +30,22 @@ enum {
     ZNRuntimeActionFlagFeatureDescription = 1u << 5,
     // M6.4 Native Hook config JSON. For NativeHook entries reserved[0] points to it.
     ZNRuntimeActionFlagNativeHookConfig = 1u << 6,
+    // P2: index 1..128 in flags bits 16..23; 0 means legacy automatic resolution.
+    // Does not change ZNRuntimeMethodCallEntry ABI or consume reserved[] offsets.
+    ZNRuntimeActionFlagInstanceIndex = 1u << 7,
 };
+
+// Instance ordinal is an enumeration index, not a stable object identity.
+#define ZN_RUNTIME_INSTANCE_INDEX_SHIFT 16u
+#define ZN_RUNTIME_INSTANCE_INDEX_MASK (UINT32_C(0xff) << ZN_RUNTIME_INSTANCE_INDEX_SHIFT)
+
+static inline uint32_t ZNRuntimeActionEncodeInstanceIndex(uint32_t index) {
+    return index ? (ZNRuntimeActionFlagInstanceIndex | (index << ZN_RUNTIME_INSTANCE_INDEX_SHIFT)) : 0u;
+}
+static inline uint32_t ZNRuntimeActionDecodeInstanceIndex(uint32_t flags) {
+    return (flags & ZNRuntimeActionFlagInstanceIndex) ?
+        ((flags & ZN_RUNTIME_INSTANCE_INDEX_MASK) >> ZN_RUNTIME_INSTANCE_INDEX_SHIFT) : 0u;
+}
 
 typedef struct {
     uint64_t magic;
