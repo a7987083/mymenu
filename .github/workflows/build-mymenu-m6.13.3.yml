@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/method-finder-p5-detail-copy
   workflow_dispatch:
 
 jobs:
