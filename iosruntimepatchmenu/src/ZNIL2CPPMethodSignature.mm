@@ -7,11 +7,7 @@
 #import <mach-o/dyld.h>
 
 namespace {
-using DomainGetFn = void *(*)();
-using DomainGetAssembliesFn = const void **(*)(const void *, size_t *);
-using AssemblyGetImageFn = const void *(*)(const void *);
 using ImageGetNameFn = const char *(*)(const void *);
-using ClassFromNameFn = void *(*)(const void *, const char *, const char *);
 using ClassGetMethodsFn = const void *(*)(void *, void **);
 using MethodGetNameFn = const char *(*)(const void *);
 using MethodGetParamCountFn = uint32_t (*)(const void *);
@@ -22,15 +18,6 @@ using Il2CppFreeFn = void (*)(void *);
 
 static NSString *ZNM46Trim(NSString *value) {
     return [value ?: @"" stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-}
-
-static NSString *ZNM46NormalizeAssembly(NSString *value) {
-    NSString *s = ZNM46Trim(value).lowercaseString;
-    return [s hasSuffix:@".dll"] ? [s substringToIndex:s.length - 4] : s;
-}
-
-static BOOL ZNM46AssemblyMatches(NSString *actual, NSString *wanted) {
-    return [ZNM46NormalizeAssembly(actual) isEqualToString:ZNM46NormalizeAssembly(wanted)];
 }
 
 static NSString *ZNM46String(const char *raw) {
@@ -165,11 +152,7 @@ NSString *ZNIL2CPPShortSignature(NSString *methodName, NSArray<NSString *> *para
         return nil;
     }
 
-    DomainGetFn domainGet = (DomainGetFn)ZNM46Symbol(base.unityPath, "il2cpp_domain_get");
-    DomainGetAssembliesFn domainGetAssemblies = (DomainGetAssembliesFn)ZNM46Symbol(base.unityPath, "il2cpp_domain_get_assemblies");
-    AssemblyGetImageFn assemblyGetImage = (AssemblyGetImageFn)ZNM46Symbol(base.unityPath, "il2cpp_assembly_get_image");
     ImageGetNameFn imageGetName = (ImageGetNameFn)ZNM46Symbol(base.unityPath, "il2cpp_image_get_name");
-    ClassFromNameFn classFromName = (ClassFromNameFn)ZNM46Symbol(base.unityPath, "il2cpp_class_from_name");
     ClassGetMethodsFn classGetMethods = (ClassGetMethodsFn)ZNM46Symbol(base.unityPath, "il2cpp_class_get_methods");
     MethodGetNameFn methodGetName = (MethodGetNameFn)ZNM46Symbol(base.unityPath, "il2cpp_method_get_name");
     MethodGetParamCountFn methodGetParamCount = (MethodGetParamCountFn)ZNM46Symbol(base.unityPath, "il2cpp_method_get_param_count");
@@ -178,43 +161,28 @@ NSString *ZNIL2CPPShortSignature(NSString *methodName, NSArray<NSString *> *para
     MethodGetPointerFn methodGetPointer = (MethodGetPointerFn)ZNM46Symbol(base.unityPath, "il2cpp_method_get_pointer");
     Il2CppFreeFn il2cppFree = (Il2CppFreeFn)ZNM46Symbol(base.unityPath, "il2cpp_free");
 
-    if (!domainGet || !domainGetAssemblies || !assemblyGetImage || !imageGetName || !classFromName ||
-        !classGetMethods || !methodGetName || !methodGetParamCount || !methodGetParam || !typeGetName) {
+    if (!imageGetName || !classGetMethods || !methodGetName || !methodGetParamCount || !methodGetParam || !typeGetName) {
         if (error) *error = @"FAILED_SIGNATURE_RESOLVER：完整签名解析所需 IL2CPP API 不完整";
         return nil;
     }
 
-    void *domain = domainGet();
-    size_t assemblyCount = 0;
-    const void **assemblies = domain ? domainGetAssemblies(domain, &assemblyCount) : nullptr;
-    if (!assemblies || !assemblyCount) {
-        if (error) *error = @"FAILED_SIGNATURE_RESOLVER：IL2CPP Domain 没有程序集";
+    // Share the already-validated class lookup with Method Finder and Instance Resolver.
+    // A failed class_from_name must not bypass the unique class-enumeration fallback.
+    NSDictionary<NSString *, id> *resolvedClass = [base resolveClassAssembly:assembly
+                                                                  namespace:namespaceName ?: @""
+                                                                  className:className ?: @""];
+    if (!resolvedClass) {
+        if (error) *error = [NSString stringWithFormat:@"FAILED_SIGNATURE_NOT_FOUND：Class %@.%@ (%@)",
+                            namespaceName ?: @"", className ?: @"", base.lastError ?: @"unknown"];
         return nil;
     }
-
-    const void *wantedImage = nullptr;
-    NSString *actualAssembly = @"";
-    for (size_t i = 0; i < assemblyCount; i++) {
-        const void *image = assemblyGetImage(assemblies[i]);
-        NSString *imageName = ZNM46String(image ? imageGetName(image) : nullptr);
-        if (image && ZNM46AssemblyMatches(imageName, assembly)) {
-            wantedImage = image;
-            actualAssembly = imageName;
-            break;
-        }
-    }
-    if (!wantedImage) {
-        if (error) *error = [NSString stringWithFormat:@"FAILED_SIGNATURE_NOT_FOUND：Assembly %@", assembly ?: @""];
+    const void *wantedImage = (const void *)(uintptr_t)[resolvedClass[@"image"] unsignedLongLongValue];
+    void *klass = (void *)(uintptr_t)[resolvedClass[@"class"] unsignedLongLongValue];
+    if (!wantedImage || !klass) {
+        if (error) *error = @"FAILED_SIGNATURE_RESOLVER：共享类解析器返回空地址";
         return nil;
     }
-
-    void *klass = classFromName(wantedImage,
-                                (namespaceName ?: @"").UTF8String ?: "",
-                                (className ?: @"").UTF8String ?: "");
-    if (!klass) {
-        if (error) *error = [NSString stringWithFormat:@"FAILED_SIGNATURE_NOT_FOUND：Class %@.%@", namespaceName ?: @"", className ?: @""];
-        return nil;
-    }
+    NSString *actualAssembly = ZNM46String(imageGetName(wantedImage));
 
     NSMutableArray<NSDictionary *> *matches = [NSMutableArray array];
     void *iter = nullptr;

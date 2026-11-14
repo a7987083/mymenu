@@ -2,7 +2,6 @@
 #import "ZNRuntimeActionFormat.h"
 #import "ZNRuntimeActionModel.h"
 #import "ZNIL2CPPInvokeEngine.h"
-#import "ZNIL2CPPInstanceResolver.h"
 #import "ZNIL2CPPMethodSignature.h"
 #import "ZNStaticPatchFormat.h"
 #import "ZNGeneratedDataLayout.h"
@@ -77,26 +76,6 @@ static void ZNRARParseImage(uint32_t imageIndex,NSMutableArray *out,NSMutableSet
 + (instancetype)sharedRuntime{static ZNRuntimeActionRuntime *r;static dispatch_once_t once;dispatch_once(&once,^{r=[ZNRuntimeActionRuntime new];});return r;}
 - (instancetype)init{self=[super init];if(!self)return nil;_records=@[];_directRecords=@[];_lastDiagnostics=@[];_lastStatus=@"尚未扫描 Runtime Method Call";_cachedImageCount=0;_cachedImageFingerprint=0;_hasScanned=NO;return self;}
 - (void)refresh{uint32_t imageCount=_dyld_image_count();if(self.hasScanned&&self.cachedImageCount==imageCount)return;uint64_t fingerprint=ZNRARImageFingerprint(imageCount);NSMutableArray *found=[NSMutableArray array];NSMutableSet *dedupe=[NSMutableSet set];NSMutableArray *diag=[NSMutableArray array];for(uint32_t i=0;i<imageCount;i++)ZNRARParseImage(i,found,dedupe,diag);NSMutableArray *runtime=[NSMutableArray array],*direct=[NSMutableArray array];for(ZNRuntimeMethodActionRecord *r in found){if(r.executionKind==ZNRuntimeActionKindDirectNativeCall)[direct addObject:r];else[runtime addObject:r];}self.records=[runtime copy];self.directRecords=[direct copy];self.lastDiagnostics=[diag copy];self.cachedImageCount=imageCount;self.cachedImageFingerprint=fingerprint;self.hasScanned=YES;self.lastStatus=[NSString stringWithFormat:@"Runtime Method Call：%lu · Direct Native Call：%lu",(unsigned long)runtime.count,(unsigned long)direct.count];[[ZNRuntimeLogger sharedLogger]log:[NSString stringWithFormat:@"[runtime-action] refresh runtime=%lu direct=%lu",(unsigned long)runtime.count,(unsigned long)direct.count]];}
-- (BOOL)executeRecord:(ZNRuntimeMethodActionRecord *)record error:(NSString **)error{if(!record){if(error)*error=@"Runtime Method Call record 为空";return NO;}ZNRuntimeMethodAction *a=[ZNRuntimeMethodAction new];a.actionID=record.actionID;a.title=record.title;a.group=record.group;a.featureDescription=record.featureDescription?:@"";a.assembly=record.assembly;a.namespaceName=record.namespaceName;a.className=record.className;a.methodName=record.methodName;a.argumentCount=record.argumentCount;a.instanceIndex=record.instanceIndex;a.argumentValues=record.argumentValues?:@[];a.parameterTypeNames=record.parameterTypeNames?:@[];a.signatureAvailable=record.signatureAvailable;a.argumentControlConfigs=record.argumentControlConfigs?:@[];a.immediateChain=record.immediateChain?:@{};NSString *invokeError=nil;NSDictionary *result=nil;
-    if (a.instanceIndex) {
-        NSString *diagnostics=nil,*resolveError=nil;
-        NSArray<NSNumber *> *instances=[[ZNIL2CPPInstanceResolver sharedResolver]
-            candidateAddressesForAssembly:a.assembly
-                               namespace:a.namespaceName
-                               className:a.className
-                                   limit:128
-                             diagnostics:&diagnostics
-                                   error:&resolveError];
-        if (instances.count < a.instanceIndex) {
-            invokeError=resolveError ?: [NSString stringWithFormat:
-                @"FAILED_INSTANCE_INDEX：指定实例 %lu，当前发现 %lu 个；实例序号不保证跨重启稳定",
-                (unsigned long)a.instanceIndex,(unsigned long)instances.count];
-        } else {
-            uintptr_t receiver=(uintptr_t)[instances[a.instanceIndex-1] unsignedLongLongValue];
-            result=[[ZNIL2CPPInvokeEngine sharedEngine]executeAction:a receiver:receiver error:&invokeError];
-        }
-    } else {
-        result=[[ZNIL2CPPInvokeEngine sharedEngine]executeAction:a error:&invokeError];
-    }if(!result){self.lastStatus=invokeError?:@"Runtime Method Call 执行失败";if(error)*error=self.lastStatus;return NO;}self.lastStatus=[NSString stringWithFormat:@"%@：SUCCESS",record.title.length?record.title:record.methodName];return YES;}
+- (BOOL)executeRecord:(ZNRuntimeMethodActionRecord *)record error:(NSString **)error{if(!record){if(error)*error=@"Runtime Method Call record 为空";return NO;}ZNRuntimeMethodAction *a=[ZNRuntimeMethodAction new];a.actionID=record.actionID;a.title=record.title;a.group=record.group;a.featureDescription=record.featureDescription?:@"";a.assembly=record.assembly;a.namespaceName=record.namespaceName;a.className=record.className;a.methodName=record.methodName;a.argumentCount=record.argumentCount;a.instanceIndex=record.instanceIndex;a.argumentValues=record.argumentValues?:@[];a.parameterTypeNames=record.parameterTypeNames?:@[];a.signatureAvailable=record.signatureAvailable;a.argumentControlConfigs=record.argumentControlConfigs?:@[];a.immediateChain=record.immediateChain?:@{};NSString *invokeError=nil;NSDictionary *result=[[ZNIL2CPPInvokeEngine sharedEngine] executeAction:a error:&invokeError];if(!result){self.lastStatus=invokeError?:@"Runtime Method Call 执行失败";if(error)*error=self.lastStatus;return NO;}self.lastStatus=[NSString stringWithFormat:@"%@：SUCCESS",record.title.length?record.title:record.methodName];return YES;}
 - (NSArray<NSString *> *)diagnosticLines{NSMutableArray *lines=[NSMutableArray array];[lines addObject:self.lastStatus?:@""];[lines addObjectsFromArray:self.lastDiagnostics?:@[]];for(ZNRuntimeMethodActionRecord *r in self.records)[lines addObject:[NSString stringWithFormat:@"[%u] %@ · %@ · args=%@ · controls=%lu · chain=%@",r.actionID,r.title?:@"",r.canonicalIdentity,r.argumentValues?:@[],(unsigned long)r.argumentControlConfigs.count,r.immediateChain.count?@"YES":@"NO"]];return lines;}
 @end
