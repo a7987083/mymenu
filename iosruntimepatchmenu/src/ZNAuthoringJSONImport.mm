@@ -4,6 +4,11 @@
 #import "ZNIL2CPPResolver.h"
 #import "ZNIL2CPPMethodSignature.h"
 #import "ZNAuthoringRuntimeFeatureIdentity.h"
+#import "ZNBinaryPatchWorkspace.h"
+
+extern "C" NSArray<NSDictionary *> *ZNM592ExportOffsetRows(void);
+extern "C" BOOL ZNM592ValidateOffsetRows(NSArray<NSDictionary *> *, NSString **);
+extern "C" BOOL ZNM592ImportOffsetRows(NSArray<NSDictionary *> *, NSString *, NSString **);
 
 static NSDictionary *ZNPortableRuntimeRecord(ZNRuntimeMethodAction *a) {
     return @{
@@ -49,14 +54,16 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
 + (NSData *)exportDataWithError:(NSString **)error {
     NSArray<ZNRuntimeMethodAction *> *methods=[[ZNRuntimeActionStore sharedStore] actionsSnapshot];
     NSArray<ZNNativeHookAction *> *hooks=[[ZNNativeHookStore sharedStore] actionsSnapshot];
-    if(!methods.count&&!hooks.count){
-        if(error)*error=@"没有可导出的 Runtime Method 或 Native Hook";
+    NSArray<NSDictionary *> *offsets=ZNM592ExportOffsetRows();
+    if(!methods.count&&!hooks.count&&!offsets.count){
+        if(error)*error=@"没有可导出的 Offset、Runtime Method 或 Native Hook";
         return nil;
     }
-    if(methods.count>256||hooks.count>256){
+    if(methods.count>256||hooks.count>256||offsets.count>256){
         if(error)*error=@"配置数量超过导入器的 256 条限制";
         return nil;
     }
+    if(!ZNM592ValidateOffsetRows(offsets,error)) return nil;
     // Do not claim a portable backup when exact signatures are unavailable.
     for(ZNRuntimeMethodAction *a in methods) {
         if(!a.signatureAvailable||a.parameterTypeNames.count!=a.argumentCount) {
@@ -77,8 +84,10 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
     for(ZNRuntimeMethodAction *a in methods)[runtime addObject:ZNPortableRuntimeRecord(a)];
     for(ZNNativeHookAction *a in hooks)[native addObject:ZNPortableNativeRecord(a)];
     NSDictionary *root=@{@"format":@"zonoe-authoring",
-                          @"schemaVersion":@1,
-                          @"runtimeMethods":runtime, @"nativeHooks":native};
+                          @"schemaVersion":@2,
+                          @"runtimeMethods":runtime, @"nativeHooks":native,
+                           @"offsetPatches":offsets,
+                           @"offsetDefaultTarget":[ZNBinaryPatchWorkspace sharedWorkspace].defaultTarget?:@"自动"};
     NSError *jsonError=nil;
     NSData *data=[NSJSONSerialization dataWithJSONObject:root options:NSJSONWritingPrettyPrinted|NSJSONWritingSortedKeys error:&jsonError];
     if(!data&&error)*error=jsonError.localizedDescription?:@"JSON 序列化失败";
@@ -100,23 +109,31 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
     }
     NSDictionary *root=(NSDictionary *)decoded;
     if(![root[@"schemaVersion"] isKindOfClass:NSNumber.class]||
-       [root[@"schemaVersion"] integerValue]!=1){
+       ([root[@"schemaVersion"] integerValue]!=1 && [root[@"schemaVersion"] integerValue]!=2)){
         if(error)*error=@"不支持的配置 Schema 版本";
         return NO;
     }
     NSArray *methods=root[@"runtimeMethods"]?:@[];
     NSArray *hooks=root[@"nativeHooks"]?:@[];
+    BOOL v2=[root[@"schemaVersion"] integerValue]==2;
+    NSArray *offsets=v2?(root[@"offsetPatches"]?:@[]):@[];
+    NSString *offsetDefaultTarget=v2?(root[@"offsetDefaultTarget"]?:@"自动"):@"自动";
     if(![methods isKindOfClass:NSArray.class]||![hooks isKindOfClass:NSArray.class]||
-       (!methods.count&&!hooks.count)||methods.count>256||hooks.count>256){
+       ![offsets isKindOfClass:NSArray.class]||
+       (!methods.count&&!hooks.count&&!offsets.count)||methods.count>256||hooks.count>256||offsets.count>256){
         if(error)*error=@"配置列表为空、类型错误或数量超过 256";
         return NO;
     }
 
+    if(offsets.count && !ZNM592ValidateOffsetRows(offsets,error)) return NO;
+    if(![offsetDefaultTarget isKindOfClass:NSString.class]) {
+        if(error)*error=@"Offset 默认 Target 类型错误"; return NO;
+    }
     ZNRuntimeActionStore *store=[ZNRuntimeActionStore sharedStore];
     ZNNativeHookStore *hookStore=[ZNNativeHookStore sharedStore];
     ZNIL2CPPResolver *resolver=[ZNIL2CPPResolver sharedResolver];
-    [resolver refresh];
-    if(!resolver.available){
+    if(methods.count || hooks.count) [resolver refresh];
+    if((methods.count || hooks.count) && !resolver.available){
         if(error)*error=@"IL2CPP 尚未就绪，无法自动验证目标方法；未导入";
         return NO;
     }
@@ -279,8 +296,9 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
         }
         addedHooks++;
     }
-    if(status)*status=[NSString stringWithFormat:@"导入成功：Runtime Method %lu，Native Hook %lu；旧 RVA 已废弃",
-                       (unsigned long)addedMethods,(unsigned long)addedHooks];
+    if(offsets.count && !ZNM592ImportOffsetRows(offsets,offsetDefaultTarget,error)) return NO;
+    if(status)*status=[NSString stringWithFormat:@"导入成功：Offset %lu，Runtime Method %lu，Native Hook %lu",
+                        (unsigned long)offsets.count,(unsigned long)addedMethods,(unsigned long)addedHooks];
     return YES;
 }
 @end
