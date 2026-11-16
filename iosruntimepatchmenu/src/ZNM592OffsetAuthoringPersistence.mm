@@ -158,6 +158,88 @@ static NSDictionary *ZNM592EncodeRow(ZNBinaryPatchRow *row) {
     };
 }
 
+// Shared Offset authoring codec: local persistence and portable JSON use one layout.
+static ZNBinaryPatchRow *ZNM592DecodeRow(NSDictionary *item) {
+    ZNBinaryPatchRow *row=[ZNBinaryPatchRow new];
+    row.target=item[@"target"]?:@"";
+    row.explicitTarget=[item[@"explicitTarget"] boolValue];
+    row.offsetText=item[@"offset"]?:@"";
+    row.enabledText=item[@"enabled"]?:@"";
+    row.title=item[@"title"]?:@"";
+    row.group=item[@"group"]?:@"Imported";
+    row.sourcePath=item[@"sourcePath"]?:@"";
+    row.featureDescription=item[@"featureDescription"]?:@"";
+    row.lowConfidence=[item[@"lowConfidence"] boolValue];
+    row.featureControlType=(ZNFeatureControlType)[item[@"controlType"] integerValue];
+    row.featureValueType=(ZNValueType)[item[@"valueType"] integerValue];
+    row.validated=NO; row.validator=nil; row.originalHex=@"";
+    row.statusText=@"已导入 · 待自动准备";
+    return row;
+}
+
+extern "C" NSArray<NSDictionary *> *ZNM592ExportOffsetRows(void) {
+    NSMutableArray *records=[NSMutableArray array];
+    for(ZNBinaryPatchRow *row in [ZNBinaryPatchWorkspace sharedWorkspace].rows) {
+        if(ZNM592MeaningfulRow(row)) [records addObject:ZNM592EncodeRow(row)];
+    }
+    return [records copy];
+}
+
+static BOOL ZNM592ValidOffsetRecord(NSDictionary *d, NSString **error) {
+    if(![d isKindOfClass:NSDictionary.class]) {
+        if(error)*error=@"Offset 条目不是对象"; return NO;
+    }
+    for(NSString *key in @[@"target",@"offset",@"enabled",@"title",@"group",@"sourcePath",@"featureDescription"]) {
+        if(d[key] && ![d[key] isKindOfClass:NSString.class]) {
+            if(error)*error=[NSString stringWithFormat:@"Offset 字段 %@ 类型错误",key]; return NO;
+        }
+    }
+    for(NSString *key in @[@"explicitTarget",@"lowConfidence",@"controlType",@"valueType"]) {
+        if(d[key] && ![d[key] isKindOfClass:NSNumber.class]) {
+            if(error)*error=[NSString stringWithFormat:@"Offset 字段 %@ 类型错误",key]; return NO;
+        }
+    }
+    NSInteger control=[d[@"controlType"] integerValue],type=[d[@"valueType"] integerValue];
+    if(control<0 || control>3 || type<0 || type>6) {
+        if(error)*error=@"Offset 控件或数值类型不受支持"; return NO;
+    }
+    NSString *offset=d[@"offset"]?:@"", *enabled=d[@"enabled"]?:@"";
+    uint64_t rva=0;
+    if(!offset.length || !ZNM592ParseRVA(offset,&rva)) {
+        if(error)*error=[NSString stringWithFormat:@"Offset 地址非法：%@",offset]; return NO;
+    }
+    if(control!=ZNFeatureControlTypeNumber && control!=ZNFeatureControlTypeSlider && !enabled.length) {
+        if(error)*error=@"Offset 补丁字节为空"; return NO;
+    }
+    return YES;
+}
+
+extern "C" BOOL ZNM592ImportOffsetRows(NSArray<NSDictionary *> *records,
+                                        NSString *defaultTarget, NSString **error) {
+    ZNBinaryPatchWorkspace *workspace=[ZNBinaryPatchWorkspace sharedWorkspace];
+    if(workspace.isBuilding || workspace.hasAnyApplied) {
+        if(error)*error=@"正在构建或有已应用的补丁，无法覆盖 Offset 编辑记录";
+        return NO;
+    }
+    if(![records isKindOfClass:NSArray.class] || records.count>256) {
+        if(error)*error=@"Offset 列表类型错误或超过 256 条"; return NO;
+    }
+    NSMutableArray<ZNBinaryPatchRow *> *rows=[NSMutableArray arrayWithCapacity:records.count];
+    for(id item in records) {
+        if(!ZNM592ValidOffsetRecord(item,error)) return NO;
+        [rows addObject:ZNM592DecodeRow(item)];
+    }
+    if(defaultTarget && ![defaultTarget isKindOfClass:NSString.class]) {
+        if(error)*error=@"Offset 默认 Target 类型错误"; return NO;
+    }
+    [workspace.rows removeAllObjects];
+    [workspace.rows addObjectsFromArray:rows];
+    [workspace ensureDefaultRows];
+    workspace.defaultTarget=defaultTarget.length?defaultTarget:@"自动";
+    ZNM592SaveWorkspace();
+    return YES;
+}
+
 static void ZNM592SaveWorkspace(void) {
     if(gZNM592Restoring) return;
     ZNBinaryPatchWorkspace *workspace=[ZNBinaryPatchWorkspace sharedWorkspace];
@@ -192,22 +274,7 @@ static void ZNM592RestoreWorkspace(void) {
     NSUInteger restored=0;
     for(NSDictionary *item in items) {
         if(![item isKindOfClass:NSDictionary.class]) continue;
-        ZNBinaryPatchRow *row=[ZNBinaryPatchRow new];
-        row.target=[item[@"target"] isKindOfClass:NSString.class]?item[@"target"]:@"";
-        row.explicitTarget=[item[@"explicitTarget"] boolValue];
-        row.offsetText=[item[@"offset"] isKindOfClass:NSString.class]?item[@"offset"]:@"";
-        row.enabledText=[item[@"enabled"] isKindOfClass:NSString.class]?item[@"enabled"]:@"";
-        row.title=[item[@"title"] isKindOfClass:NSString.class]?item[@"title"]:@"";
-        row.group=[item[@"group"] isKindOfClass:NSString.class]?item[@"group"]:@"Imported";
-        row.sourcePath=[item[@"sourcePath"] isKindOfClass:NSString.class]?item[@"sourcePath"]:@"";
-        row.featureDescription=[item[@"featureDescription"] isKindOfClass:NSString.class]?item[@"featureDescription"]:@"";
-        row.lowConfidence=[item[@"lowConfidence"] boolValue];
-        row.featureControlType=(ZNFeatureControlType)[item[@"controlType"] integerValue];
-        row.featureValueType=(ZNValueType)[item[@"valueType"] integerValue];
-        row.validated=NO;
-        row.validator=nil;
-        row.originalHex=@"";
-        row.statusText=@"已恢复 · 待自动准备";
+        ZNBinaryPatchRow *row=ZNM592DecodeRow(item);
         [workspace.rows addObject:row];
         restored++;
     }
