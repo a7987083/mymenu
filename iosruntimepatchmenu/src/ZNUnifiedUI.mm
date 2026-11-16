@@ -1645,6 +1645,7 @@ static void ZN48RelabelJSONList(UIView *view) {
 
 @interface ZNRuntimeMenuControllerV040 (V048) <UIDocumentPickerDelegate>
 - (void)zn48_importJSON:(id)sender;
+- (void)zn48_jsonTapped:(UIButton *)sender;
 - (void)zn48_exportJSON:(id)sender;
 - (void)zn48_presentManualPicker;
 - (void)zn48_renderOther;
@@ -1671,6 +1672,29 @@ static void ZN48RelabelJSONList(UIView *view) {
         return;
     }
     [presenter presentViewController:picker animated:YES completion:nil];
+}
+
+// Single authoring/legacy JSON dispatcher for picker and sibling-file list.
+static BOOL ZN48ImportJSONData(NSData *data, NSString *path,
+                               NSString **status, NSString **error) {
+    NSError *decodeError=nil;
+    id root=[NSJSONSerialization JSONObjectWithData:data options:0 error:&decodeError];
+    if(!root) {
+        if(error)*error=decodeError.localizedDescription?:@"JSON 格式无效";
+        return NO;
+    }
+    if([ZNAuthoringJSONImport isAuthoringConfiguration:root])
+        return [ZNAuthoringJSONImport importData:data status:status error:error];
+    if([root isKindOfClass:NSDictionary.class] &&
+       [root[@"format"] isKindOfClass:NSString.class] &&
+       [root[@"format"] hasPrefix:@"zonoe-"]) {
+        if(error)*error=@"未知的 Zonoe 配置格式；不会作为 Patch JSON 导入";
+        return NO;
+    }
+    ZNBinaryPatchWorkspace *ws=[ZNBinaryPatchWorkspace sharedWorkspace];
+    BOOL ok=[ws importJSONAtPath:path error:error];
+    if(ok && status)*status=[NSString stringWithFormat:@"Patch %lu",(unsigned long)ws.filledCount];
+    return ok;
 }
 
 static NSString *ZN48ExportGameFileName(void) {
@@ -1745,6 +1769,26 @@ static NSString *ZN48ExportGameFileName(void) {
     [self zn48_presentManualPicker];
 }
 
+- (void)zn48_jsonTapped:(UIButton *)sender {
+    ZNBinaryPatchWorkspace *ws=[ZNBinaryPatchWorkspace sharedWorkspace];
+    NSUInteger index=(NSUInteger)(sender.tag-446000);
+    if(index>=ws.jsonFiles.count) return;
+    if(ws.isBuilding || ws.hasAnyApplied) {
+        ws.lastStatus=@"正在生成或有未恢复的补丁，不能导入 JSON";
+        [self renderPage]; return;
+    }
+    NSString *path=ws.jsonFiles[index];
+    NSError *readError=nil;
+    NSData *data=[NSData dataWithContentsOfFile:path options:0 error:&readError];
+    NSString *error=nil,*status=nil;
+    BOOL ok=data.length && ZN48ImportJSONData(data,path,&status,&error);
+    ws.lastStatus=ok?
+        [NSString stringWithFormat:@"导入成功：%@ · %@",path.lastPathComponent,status?:@"已校验"]:
+        [NSString stringWithFormat:@"导入失败：%@",error?:readError.localizedDescription?:@"文件读取失败"];
+    ws.showJSONFiles=NO;
+    [self renderPage];
+}
+
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     (void)controller;
     NSURL *url=urls.firstObject;
@@ -1788,23 +1832,7 @@ static NSString *ZN48ExportGameFileName(void) {
     }
 
     NSString *importError=nil,*importStatus=nil;
-    NSError *decodeError=nil;
-    id root=[NSJSONSerialization JSONObjectWithData:data options:0 error:&decodeError];
-    BOOL isAuthoring=[ZNAuthoringJSONImport isAuthoringConfiguration:root];
-    BOOL hasReservedFormat=[root isKindOfClass:NSDictionary.class]&&
-        [root[@"format"] isKindOfClass:NSString.class]&&
-        [root[@"format"] hasPrefix:@"zonoe-"];
-    BOOL ok=NO;
-    if(!root){
-        importError=decodeError.localizedDescription?:@"JSON 格式无效";
-    }else if(isAuthoring){
-        ok=[ZNAuthoringJSONImport importData:data status:&importStatus error:&importError];
-    }else if(hasReservedFormat){
-        importError=@"未知的 Zonoe 配置格式；不会作为 Patch JSON 导入";
-    }else{
-        ok=[ws importJSONAtPath:tmp error:&importError];
-        if(ok)importStatus=[NSString stringWithFormat:@"Patch %lu",(unsigned long)ws.filledCount];
-    }
+    BOOL ok=ZN48ImportJSONData(data,tmp,&importStatus,&importError);
     [[NSFileManager defaultManager] removeItemAtPath:tmp error:nil];
     ws.lastStatus=ok?
         [NSString stringWithFormat:@"导入成功：%@ · %@",name,importStatus?:@"已校验"]:
@@ -1844,6 +1872,7 @@ static void ZNInstallV048JSONImport(void){
         Class cls=NSClassFromString(@"ZNRuntimeMenuControllerV040");
         if(!cls) return;
         ZNSwapV048(cls,@selector(zn44_importJSON:),@selector(zn48_importJSON:));
+        ZNSwapV048(cls,@selector(zn44_jsonTapped:),@selector(zn48_jsonTapped:));
         ZNSwapV048(cls,@selector(zn44_renderOther),@selector(zn48_renderOther));
         ZNSwapV048(cls,@selector(makeUI:),@selector(zn48_makeUI:));
         ZNSwapV048(cls,@selector(tick:),@selector(zn48_tick:));
