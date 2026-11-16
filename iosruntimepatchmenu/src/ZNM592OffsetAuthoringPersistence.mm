@@ -158,6 +158,8 @@ static NSDictionary *ZNM592EncodeRow(ZNBinaryPatchRow *row) {
     };
 }
 
+static void ZNM592SaveWorkspace(void);
+
 // Shared Offset authoring codec: local persistence and portable JSON use one layout.
 static ZNBinaryPatchRow *ZNM592DecodeRow(NSDictionary *item) {
     ZNBinaryPatchRow *row=[ZNBinaryPatchRow new];
@@ -214,6 +216,14 @@ static BOOL ZNM592ValidOffsetRecord(NSDictionary *d, NSString **error) {
     return YES;
 }
 
+extern "C" BOOL ZNM592ValidateOffsetRows(NSArray<NSDictionary *> *records, NSString **error) {
+    if(![records isKindOfClass:NSArray.class] || records.count>256) {
+        if(error)*error=@"Offset 列表类型错误或超过 256 条"; return NO;
+    }
+    for(id item in records) if(!ZNM592ValidOffsetRecord(item,error)) return NO;
+    return YES;
+}
+
 extern "C" BOOL ZNM592ImportOffsetRows(NSArray<NSDictionary *> *records,
                                         NSString *defaultTarget, NSString **error) {
     ZNBinaryPatchWorkspace *workspace=[ZNBinaryPatchWorkspace sharedWorkspace];
@@ -221,9 +231,7 @@ extern "C" BOOL ZNM592ImportOffsetRows(NSArray<NSDictionary *> *records,
         if(error)*error=@"正在构建或有已应用的补丁，无法覆盖 Offset 编辑记录";
         return NO;
     }
-    if(![records isKindOfClass:NSArray.class] || records.count>256) {
-        if(error)*error=@"Offset 列表类型错误或超过 256 条"; return NO;
-    }
+    if(!ZNM592ValidateOffsetRows(records,error)) return NO;
     NSMutableArray<ZNBinaryPatchRow *> *rows=[NSMutableArray arrayWithCapacity:records.count];
     for(id item in records) {
         if(!ZNM592ValidOffsetRecord(item,error)) return NO;
