@@ -1,4 +1,5 @@
 #import "ZNRuntimeOnlyBinaryBuilder.h"
+#include "ZNMachOFile.h"
 #import "ZNBinaryPatchWorkspace.h"
 #import "ZNStaticPatchFormat.h"
 #import "ZNGeneratedDataLayout.h"
@@ -22,13 +23,6 @@ struct ZNRBOwnedDataCommand { struct segment_command_64 segment; struct section_
 static_assert(sizeof(ZNRBOwnedDataCommand) == sizeof(struct segment_command_64) + sizeof(struct section_64), "runtime-only owned segment ABI");
 
 struct ZNRBLayout { uint64_t imageVMBase; uint64_t firstFileSectionOffset; uint64_t oldCommandEnd; uint64_t linkeditCommandOffset; uint64_t linkeditVMAddr; uint64_t linkeditFileOffset; uint64_t linkeditFileSize; };
-
-static BOOL ZNRBShiftU32(uint32_t *field, uint64_t threshold, uint64_t delta, NSString **error) {
-    if (!field || !*field || (uint64_t)*field < threshold) return YES;
-    uint64_t value = (uint64_t)*field + delta;
-    if (value > UINT32_MAX) { if (error) *error = @"Runtime-only Builder：__LINKEDIT offset 超过 32-bit 字段范围"; return NO; }
-    *field = (uint32_t)value; return YES;
-}
 
 static BOOL ZNRBParse(uint8_t *base, size_t size, ZNRBLayout *layout, NSString **error) {
     if (!base || size < sizeof(struct mach_header_64) || !layout) { if (error) *error = @"Runtime-only Builder：Mach-O 太小"; return NO; }
@@ -63,37 +57,17 @@ static BOOL ZNRBParse(uint8_t *base, size_t size, ZNRBLayout *layout, NSString *
     return YES;
 }
 
-static BOOL ZNRBShiftLinkeditReferences(uint8_t *base, size_t size, uint64_t oldLinkeditFileOffset, uint64_t delta, NSString **error) {
-    struct mach_header_64 *mh = (struct mach_header_64 *)base; uint8_t *cursor = base + sizeof(*mh); uint8_t *limit = cursor + mh->sizeofcmds;
-    if (limit > base + size) { if (error) *error = @"Runtime-only Builder：扩展后 load commands 越界"; return NO; }
-    for (uint32_t i = 0; i < mh->ncmds; i++) {
-        if (cursor + sizeof(struct load_command) > limit) return NO; struct load_command *lc = (struct load_command *)cursor; if (lc->cmdsize < sizeof(*lc) || cursor + lc->cmdsize > limit) return NO;
-        switch (lc->cmd) {
-            case LC_SEGMENT_64: { struct segment_command_64 *seg = (struct segment_command_64 *)cursor; if (strncmp(seg->segname, SEG_LINKEDIT, 16) == 0) { seg->fileoff += delta; seg->vmaddr += delta; } break; }
-            case LC_DYLD_INFO: case LC_DYLD_INFO_ONLY: { struct dyld_info_command *d=(struct dyld_info_command *)cursor; if(!ZNRBShiftU32(&d->rebase_off,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->bind_off,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->weak_bind_off,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->lazy_bind_off,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->export_off,oldLinkeditFileOffset,delta,error)) return NO; break; }
-            case LC_SYMTAB: { struct symtab_command *s=(struct symtab_command *)cursor; if(!ZNRBShiftU32(&s->symoff,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&s->stroff,oldLinkeditFileOffset,delta,error)) return NO; break; }
-            case LC_DYSYMTAB: { struct dysymtab_command *d=(struct dysymtab_command *)cursor; if(!ZNRBShiftU32(&d->tocoff,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->modtaboff,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->extrefsymoff,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->indirectsymoff,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->extreloff,oldLinkeditFileOffset,delta,error)||!ZNRBShiftU32(&d->locreloff,oldLinkeditFileOffset,delta,error)) return NO; break; }
-            case LC_TWOLEVEL_HINTS: { struct twolevel_hints_command *h=(struct twolevel_hints_command *)cursor; if(!ZNRBShiftU32(&h->offset,oldLinkeditFileOffset,delta,error)) return NO; break; }
-            case LC_CODE_SIGNATURE: case LC_SEGMENT_SPLIT_INFO: case LC_FUNCTION_STARTS: case LC_DATA_IN_CODE:
-#ifdef LC_DYLIB_CODE_SIGN_DRS
-            case LC_DYLIB_CODE_SIGN_DRS:
-#endif
-#ifdef LC_LINKER_OPTIMIZATION_HINT
-            case LC_LINKER_OPTIMIZATION_HINT:
-#endif
-#ifdef LC_DYLD_EXPORTS_TRIE
-            case LC_DYLD_EXPORTS_TRIE:
-#endif
-#ifdef LC_DYLD_CHAINED_FIXUPS
-            case LC_DYLD_CHAINED_FIXUPS:
-#endif
-            { struct linkedit_data_command *d=(struct linkedit_data_command *)cursor; if(!ZNRBShiftU32(&d->dataoff,oldLinkeditFileOffset,delta,error)) return NO; break; }
-#ifdef LC_NOTE
-            case LC_NOTE: { struct note_command *n=(struct note_command *)cursor; if(n->offset&&n->offset>=oldLinkeditFileOffset)n->offset+=delta; break; }
-#endif
-            default: break;
-        }
-        cursor += lc->cmdsize;
+// Match the static builder's validated LINKEDIT relocation contract.
+// Runtime-only adds one __ZNDATA segment immediately before __LINKEDIT.
+static BOOL ZNRBShiftLinkeditReferences(uint8_t *base, size_t size,
+                                        uint64_t oldLinkeditFileOffset,
+                                        uint64_t delta, NSString **error) {
+    const char *why = nullptr;
+    if (!znmacho::shiftLinkedit(base, size, oldLinkeditFileOffset,
+                               delta, &why, 1)) {
+        if (error) *error = [NSString stringWithFormat:@"Runtime-only Builder：%@", 
+            [NSString stringWithUTF8String:why ? why : "LINKEDIT relocation failed"]];
+        return NO;
     }
     return YES;
 }
