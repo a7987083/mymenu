@@ -20,13 +20,12 @@
 
 static const uint32_t kZNCSMagicEmbeddedSignature = 0xfade0cc0u;
 static const uint32_t kZNCSMagicRequirements      = 0xfade0c01u;
-static const uint32_t kZNCSMagicRequirement       = 0xfade0c00u;
 static const uint32_t kZNCSMagicCodeDirectory     = 0xfade0c02u;
 static const uint32_t kZNCSSlotCodeDirectory      = 0u;
 static const uint32_t kZNCSSlotRequirements       = 2u;
 static const uint32_t kZNCSSlotAlternate          = 0x1000u;
-static const uint32_t kZNCSRequirementDesignated  = 3u;
 static const uint32_t kZNCSCodeDirectoryVersion   = 0x00020400u;
+static const uint32_t kZNCSFlagAdhoc               = 0x00000002u;
 static const uint32_t kZNCSPageShift              = 12u;
 static const uint64_t kZNCSPageSize               = 1ULL << kZNCSPageShift;
 static const uint64_t kZNVMPage                    = 0x4000ULL;
@@ -68,10 +67,6 @@ static void ZNWriteBE64(uint8_t *p, uint64_t value) {
     memcpy(p, &value, sizeof(value));
 }
 
-static void ZNAppendBE32(NSMutableData *data, uint32_t value) {
-    uint32_t be = __builtin_bswap32(value);
-    [data appendBytes:&be length:sizeof(be)];
-}
 
 static BOOL ZNParseSignLayout(uint8_t *base, uint64_t size, ZNSignLayout &layout, NSString **error) {
     if (size < sizeof(struct mach_header_64)) {
@@ -177,53 +172,14 @@ static NSString *ZNExtractExistingIdentifier(const uint8_t *base, uint64_t size,
     return fallback;
 }
 
-static void ZNReqAppendBytes(NSMutableData *data, const void *bytes, uint32_t length) {
-    ZNAppendBE32(data, length);
-    if (length) [data appendBytes:bytes length:length];
-    uint32_t padding = (4u - (length & 3u)) & 3u;
-    if (padding) {
-        static const uint8_t zeros[4] = {0,0,0,0};
-        [data appendBytes:zeros length:padding];
-    }
-}
-
-static void ZNReqAppendString(NSMutableData *data, NSString *string) {
-    NSData *utf8 = [string dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
-    ZNReqAppendBytes(data, utf8.bytes, (uint32_t)utf8.length);
-}
-
+// Ad-hoc output has no certificate chain; it must not claim one.
 static NSData *ZNBuildRequirements(NSString *identifier) {
-    NSMutableData *expr = [NSMutableData data];
-    ZNAppendBE32(expr, 1);
-    ZNAppendBE32(expr, 6);
-    ZNAppendBE32(expr, 2);
-    ZNReqAppendString(expr, identifier);
-    ZNAppendBE32(expr, 6);
-    ZNAppendBE32(expr, 15);
-    ZNAppendBE32(expr, 6);
-    ZNAppendBE32(expr, 11);
-    ZNAppendBE32(expr, 0);
-    ZNReqAppendString(expr, @"subject.CN");
-    ZNAppendBE32(expr, 1);
-    ZNReqAppendString(expr, @"");
-    ZNAppendBE32(expr, 14);
-    ZNAppendBE32(expr, 1);
-    static const uint8_t appleExtensionOID[] = {0x2a,0x86,0x48,0x86,0xf7,0x63,0x64,0x06,0x02,0x01};
-    ZNReqAppendBytes(expr, appleExtensionOID, sizeof(appleExtensionOID));
-    ZNAppendBE32(expr, 0);
-
-    uint32_t nestedLength = (uint32_t)(8 + expr.length);
-    uint32_t totalLength = 20 + nestedLength;
-    NSMutableData *requirements = [NSMutableData dataWithLength:totalLength];
-    uint8_t *p = (uint8_t *)requirements.mutableBytes;
-    ZNWriteBE32(p + 0, kZNCSMagicRequirements);
-    ZNWriteBE32(p + 4, totalLength);
-    ZNWriteBE32(p + 8, 1);
-    ZNWriteBE32(p + 12, kZNCSRequirementDesignated);
-    ZNWriteBE32(p + 16, 20);
-    ZNWriteBE32(p + 20, kZNCSMagicRequirement);
-    ZNWriteBE32(p + 24, nestedLength);
-    memcpy(p + 28, expr.bytes, expr.length);
+    (void)identifier;
+    NSMutableData *requirements=[NSMutableData dataWithLength:12];
+    uint8_t *p=(uint8_t *)requirements.mutableBytes;
+    ZNWriteBE32(p+0,kZNCSMagicRequirements);
+    ZNWriteBE32(p+4,12);
+    ZNWriteBE32(p+8,0);
     return requirements;
 }
 
@@ -263,7 +219,7 @@ static NSData *ZNBuildCodeDirectory(const uint8_t *base,
     ZNWriteBE32(p + 0, kZNCSMagicCodeDirectory);
     ZNWriteBE32(p + 4, (uint32_t)length64);
     ZNWriteBE32(p + 8, kZNCSCodeDirectoryVersion);
-    ZNWriteBE32(p + 12, 0);
+    ZNWriteBE32(p + 12, kZNCSFlagAdhoc);
     ZNWriteBE32(p + 16, (uint32_t)hashOffset64);
     ZNWriteBE32(p + 20, identOffset);
     ZNWriteBE32(p + 24, nSpecial);

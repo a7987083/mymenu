@@ -1,4 +1,5 @@
 #import "ZNStaticBinaryBuilder.h"
+#include "ZNMachOFile.h"
 #import "ZNStaticBinaryBuilderV3Internal.h"
 #import "ZNBinaryPatchWorkspace.h"
 #import "ZNPatchRuntimeValidator.h"
@@ -544,108 +545,16 @@ static NSData *ZNV3ComposedVariant(const ZNV3Physical &physical, const ZNV3Logic
     return data;
 }
 
-static BOOL ZNV3ShiftU32(uint32_t *field, uint64_t threshold, uint64_t delta, NSString **error) {
-    if (!field || !*field || (uint64_t)*field < threshold) return YES;
-    uint64_t shifted = (uint64_t)*field + delta;
-    if (shifted > UINT32_MAX) {
-        if (error) *error = @"__LINKEDIT file offset 超过 32-bit load-command 字段范围";
-        return NO;
-    }
-    *field = (uint32_t)shifted;
-    return YES;
-}
-
-static BOOL ZNV3ShiftLinkeditReferences(uint8_t *base,
-                                        uint64_t size,
+static BOOL ZNV3ShiftLinkeditReferences(uint8_t *base, uint64_t size,
                                         uint64_t oldLinkeditFileOffset,
                                         uint64_t oldLinkeditVMAddr,
-                                        uint64_t delta,
-                                        NSString **error) {
-    struct mach_header_64 *mh = (struct mach_header_64 *)base;
-    uint8_t *cursor = base + sizeof(*mh);
-    uint8_t *end = cursor + mh->sizeofcmds;
-    if (end > base + size) { if(error)*error=@"扩展后的 load commands 越界"; return NO; }
-
-    for (uint32_t i = 0; i < mh->ncmds; i++) {
-        if (cursor + sizeof(struct load_command) > end) { if(error)*error=@"扩展后的 load command 损坏"; return NO; }
-        struct load_command *lc = (struct load_command *)cursor;
-        if (lc->cmdsize < sizeof(*lc) || cursor + lc->cmdsize > end) { if(error)*error=@"扩展后的 load command size 损坏"; return NO; }
-
-        switch (lc->cmd) {
-            case LC_SEGMENT_64: {
-                struct segment_command_64 *seg = (struct segment_command_64 *)cursor;
-                if (strncmp(seg->segname, SEG_LINKEDIT, 16) == 0) {
-                    seg->fileoff += delta;
-                    seg->vmaddr += delta;
-                }
-                break;
-            }
-            case LC_DYLD_INFO:
-            case LC_DYLD_INFO_ONLY: {
-                struct dyld_info_command *d = (struct dyld_info_command *)cursor;
-                if (!ZNV3ShiftU32(&d->rebase_off, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->bind_off, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->weak_bind_off, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->lazy_bind_off, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->export_off, oldLinkeditFileOffset, delta, error)) return NO;
-                break;
-            }
-            case LC_SYMTAB: {
-                struct symtab_command *s = (struct symtab_command *)cursor;
-                if (!ZNV3ShiftU32(&s->symoff, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&s->stroff, oldLinkeditFileOffset, delta, error)) return NO;
-                break;
-            }
-            case LC_DYSYMTAB: {
-                struct dysymtab_command *d = (struct dysymtab_command *)cursor;
-                if (!ZNV3ShiftU32(&d->tocoff, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->modtaboff, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->extrefsymoff, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->indirectsymoff, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->extreloff, oldLinkeditFileOffset, delta, error) ||
-                    !ZNV3ShiftU32(&d->locreloff, oldLinkeditFileOffset, delta, error)) return NO;
-                break;
-            }
-            case LC_TWOLEVEL_HINTS: {
-                struct twolevel_hints_command *h = (struct twolevel_hints_command *)cursor;
-                if (!ZNV3ShiftU32(&h->offset, oldLinkeditFileOffset, delta, error)) return NO;
-                break;
-            }
-            case LC_CODE_SIGNATURE:
-            case LC_SEGMENT_SPLIT_INFO:
-            case LC_FUNCTION_STARTS:
-            case LC_DATA_IN_CODE:
-#ifdef LC_DYLIB_CODE_SIGN_DRS
-            case LC_DYLIB_CODE_SIGN_DRS:
-#endif
-#ifdef LC_LINKER_OPTIMIZATION_HINT
-            case LC_LINKER_OPTIMIZATION_HINT:
-#endif
-#ifdef LC_DYLD_EXPORTS_TRIE
-            case LC_DYLD_EXPORTS_TRIE:
-#endif
-#ifdef LC_DYLD_CHAINED_FIXUPS
-            case LC_DYLD_CHAINED_FIXUPS:
-#endif
-            {
-                struct linkedit_data_command *d = (struct linkedit_data_command *)cursor;
-                if (!ZNV3ShiftU32(&d->dataoff, oldLinkeditFileOffset, delta, error)) return NO;
-                break;
-            }
-#ifdef LC_NOTE
-            case LC_NOTE: {
-                struct note_command *n = (struct note_command *)cursor;
-                if (n->offset && n->offset >= oldLinkeditFileOffset) n->offset += delta;
-                break;
-            }
-#endif
-            default:
-                break;
-        }
-        cursor += lc->cmdsize;
-    }
-
+                                        uint64_t delta, NSString **error) {
     (void)oldLinkeditVMAddr;
+    const char *reason = nullptr;
+    if (!znmacho::shiftLinkedit(base,size,oldLinkeditFileOffset,delta,&reason,2)) {
+        if(error)*error=[NSString stringWithUTF8String:reason?reason:"LINKEDIT relocation failed"];
+        return NO;
+    }
     return YES;
 }
 

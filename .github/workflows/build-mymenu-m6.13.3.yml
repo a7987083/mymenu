@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/method-finder-p5-detail-copy
   workflow_dispatch:
 
 jobs:
@@ -45,6 +46,14 @@ jobs:
             -o /tmp/mymenu_method_translator_test
           /tmp/mymenu_method_translator_test
 
+      - name: Test chained-fixups relocation
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang++ -std=c++17 -Wall -Wextra -Werror \
+            iosruntimepatchmenu/tests/zn_chained_fixups_guard_test.cpp -o /tmp/mymenu_chained_guard
+          /tmp/mymenu_chained_guard
+
       - name: Install build dependencies
         shell: bash
         run: |
@@ -60,6 +69,15 @@ jobs:
           set -euo pipefail
           git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
           echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+
+      - name: Test ad-hoc signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang++ -fobjc-arc -std=c++17 -framework Foundation \
+            iosruntimepatchmenu/src/ZNAdhocMachOSigner.mm \
+            iosruntimepatchmenu/tests/macho_signer_fixture.mm -o /tmp/mymenu_signer_fixture
+          /tmp/mymenu_signer_fixture "$RUNNER_TEMP/mymenu-signer-test"
 
       - name: Build pinned Dobby for iPhone arm64
         shell: bash
