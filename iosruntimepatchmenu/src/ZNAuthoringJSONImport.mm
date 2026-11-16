@@ -126,6 +126,13 @@ static NSDictionary *ZNPortableNativeRecord(ZNNativeHookAction *a) {
     }
 
     if(offsets.count && !ZNM592ValidateOffsetRows(offsets,error)) return NO;
+    if(offsets.count) {
+        ZNBinaryPatchWorkspace *workspace=[ZNBinaryPatchWorkspace sharedWorkspace];
+        if(workspace.isBuilding || workspace.hasAnyApplied) {
+            if(error)*error=@"正在构建或有已应用的补丁，不能导入 Offset 配置";
+            return NO;
+        }
+    }
     if(![offsetDefaultTarget isKindOfClass:NSString.class]) {
         if(error)*error=@"Offset 默认 Target 类型错误"; return NO;
     }
