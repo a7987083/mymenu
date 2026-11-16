@@ -245,6 +245,13 @@ extern "C" BOOL ZNM592ImportOffsetRows(NSArray<NSDictionary *> *records,
     [workspace ensureDefaultRows];
     workspace.defaultTarget=defaultTarget.length?defaultTarget:@"自动";
     ZNM592SaveWorkspace();
+    NSUInteger imported=0;
+    for(ZNBinaryPatchRow *row in workspace.rows) if(row.offsetText.length) imported++;
+    if(imported!=records.count) {
+        if(error)*error=[NSString stringWithFormat:@"Offset 导入数量不匹配：预期 %lu，实际 %lu",
+                         (unsigned long)records.count,(unsigned long)imported];
+        return NO;
+    }
     return YES;
 }
 
