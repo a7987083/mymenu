@@ -390,7 +390,7 @@ static void *ZNIRResolveSingletonManually(NSString *assembly, NSString *ns, NSSt
     return (void *)(uintptr_t)items.firstObject.unsignedLongLongValue;
 }
 
-- (void *)resolvePersistentSingletonForAssembly:(NSString *)assembly
+- (void *)resolveSingletonForAssembly:(NSString *)assembly
                                       namespace:(NSString *)namespaceName
                                       className:(NSString *)className
                                     diagnostics:(NSString **)diagnostics
