@@ -3,6 +3,7 @@
 #import "ZNPatchCore.h"
 #import <dlfcn.h>
 #include <stdlib.h>
+#include <string.h>
 
 // M4.3 Instance Resolver V1
 // - Prefer the legacy begin/end liveness path when Unity exports it.
