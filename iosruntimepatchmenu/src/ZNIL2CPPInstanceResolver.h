@@ -16,7 +16,7 @@ NS_ASSUME_NONNULL_BEGIN
                                            className:(NSString *)className
                                          diagnostics:(NSString * _Nullable * _Nullable)diagnostics
                                                error:(NSString * _Nullable * _Nullable)error;
-- (void * _Nullable)resolvePersistentSingletonForAssembly:(NSString *)assembly
+- (void * _Nullable)resolveSingletonForAssembly:(NSString *)assembly
                                                  namespace:(NSString *)namespaceName
                                                  className:(NSString *)className
                                                diagnostics:(NSString * _Nullable * _Nullable)diagnostics
