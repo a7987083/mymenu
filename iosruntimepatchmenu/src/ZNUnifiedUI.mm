@@ -14980,7 +14980,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     NSString *className=[candidate[@"class"] isKindOfClass:NSString.class]?candidate[@"class"]:@"";
     NSString *diagnostics=nil,*error=nil;
     ZNIL2CPPInstanceResolver *resolver=[ZNIL2CPPInstanceResolver sharedResolver];
-    void *obj=[resolver resolveSingletonForAssembly:assembly
+    void *obj=[resolver resolveManualInstanceForAssembly:assembly
                                                    namespace:ns
                                                    className:className
                                                  diagnostics:&diagnostics
