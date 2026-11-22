@@ -4,9 +4,65 @@
 #import "ZNIL2CPPRuntimeCommon.h"
 #import "ZNPatchCore.h"
 #import <objc/runtime.h>
+#include <string.h>
 
 typedef void *(*ZNM44ObjectGetClassFn)(void *);
 typedef bool (*ZNM44ClassAssignableFn)(void *, void *);
+
+typedef void *(*ZNM44ClassGetParentFn)(void *);
+typedef const char *(*ZNM44ClassGetNameFn)(void *);
+typedef const char *(*ZNM44ClassGetNamespaceFn)(void *);
+typedef void *(*ZNM44ClassGetFieldFromNameFn)(void *, const char *);
+typedef void (*ZNM44FieldGetValueFn)(void *, void *, void *);
+
+// Managed GCHandle liveness is not Unity native-object liveness.
+// Check UnityEngine.Object.m_CachedPtr through exported metadata APIs only.
+// Non-Unity managed classes have no native object lifetime to validate.
+static BOOL ZNM44UnityNativeAlive(void *object, void *actualClass,
+                                  NSString *imagePath, NSString **error) {
+    ZNM44ClassGetParentFn getParent=(ZNM44ClassGetParentFn)ZNIL2CPPResolveSymbol(imagePath,"il2cpp_class_get_parent");
+    ZNM44ClassGetNameFn getName=(ZNM44ClassGetNameFn)ZNIL2CPPResolveSymbol(imagePath,"il2cpp_class_get_name");
+    ZNM44ClassGetNamespaceFn getNamespace=(ZNM44ClassGetNamespaceFn)ZNIL2CPPResolveSymbol(imagePath,"il2cpp_class_get_namespace");
+    if (!getParent||!getName||!getNamespace) {
+        // Preserve older games' existing behavior when hierarchy APIs are absent.
+        return YES;
+    }
+    void *unityObjectClass=NULL;
+    void *klass=actualClass;
+    for (NSUInteger depth=0; klass && depth<64; depth++) {
+        const char *name=getName(klass);
+        const char *ns=getNamespace(klass);
+        if (name && ns && strcmp(name,"Object")==0 && strcmp(ns,"UnityEngine")==0) {
+            unityObjectClass=klass;
+            break;
+        }
+        void *parent=getParent(klass);
+        if (parent==klass) break;
+        klass=parent;
+    }
+    if (!unityObjectClass) return YES;
+    ZNM44ClassGetFieldFromNameFn getField=(ZNM44ClassGetFieldFromNameFn)
+        ZNIL2CPPResolveSymbol(imagePath,"il2cpp_class_get_field_from_name");
+    ZNM44FieldGetValueFn getValue=(ZNM44FieldGetValueFn)
+        ZNIL2CPPResolveSymbol(imagePath,"il2cpp_field_get_value");
+    if (!getField || !getValue) {
+        if (error) *error=@"FAILED_INSTANCE_NATIVE_CHECK：Unity 原生对象校验 API 不可用";
+        return NO;
+    }
+    void *field=getField(unityObjectClass,"m_CachedPtr");
+    if (!field) {
+        if (error) *error=@"FAILED_INSTANCE_NATIVE_CHECK：UnityEngine.Object.m_CachedPtr 不可用";
+        return NO;
+    }
+    void *nativePointer=NULL;
+    getValue(object,field,&nativePointer);
+    if (!nativePointer) {
+        if (error) *error=@"FAILED_INSTANCE_DESTROYED：Unity 原生对象已销毁，请重新获取实例";
+        return NO;
+    }
+    return YES;
+}
+
 
 static NSMutableDictionary<NSString *, NSNumber *> *ZNM44SelectionStore(void) {
     static NSMutableDictionary<NSString *, NSNumber *> *store;
@@ -87,6 +143,11 @@ static void *ZNM44ResolveClass(NSString *assembly,
     void *actualClass = objectGetClass((void *)address);
     if (!actualClass || !assignable(targetClass, actualClass)) {
         if (error) *error = [NSString stringWithFormat:@"实例 0x%llX 不属于 %@", (unsigned long long)address, className ?: @"target class"];
+        return NO;
+    }
+    NSString *nativeError=nil;
+    if (!ZNM44UnityNativeAlive((void *)address,actualClass,path,&nativeError)) {
+        if (error) *error=nativeError ?: @"FAILED_INSTANCE_DESTROYED：对象不可用";
         return NO;
     }
     if (error) *error = nil;
