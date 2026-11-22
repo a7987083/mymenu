@@ -67,6 +67,80 @@ static void *ZNIRReallocate(void *ptr, size_t size, void *userdata) {
     return realloc(ptr, size);
 }
 
+
+typedef void *(*ZNIRClassGetParentFn)(void *);
+typedef const char *(*ZNIRClassGetNameFn)(void *);
+typedef const void *(*ZNIRGetMethodFn)(void *, const char *, int);
+typedef uint32_t (*ZNIRMethodGetFlagsFn)(const void *, uint32_t *);
+typedef void *(*ZNIRRuntimeInvokeFn)(const void *, void *, void **, void **);
+typedef void *(*ZNIRThreadCurrentFn)(void);
+typedef void *(*ZNIRThreadAttachFn)(void *);
+
+static void *ZNIRPersistentSingleton(NSString *assembly, NSString *ns, NSString *className,
+                                     NSString **diagnostics, NSString **error) {
+    ZNIL2CPPResolver *resolver = [ZNIL2CPPResolver sharedResolver];
+    [resolver refresh];
+    NSDictionary *info = [resolver resolveClassAssembly:assembly namespace:ns ?: @"" className:className];
+    void *klass = (void *)(uintptr_t)[info[@"class"] unsignedLongLongValue];
+    if (!klass) {
+        if(error)*error=@"FAILED_SINGLETON_CLASS：无法解析类";
+        return NULL;
+    }
+    NSString *path=resolver.unityPath ?: @"";
+    ZNIRClassGetParentFn parentFn=(ZNIRClassGetParentFn)ZNIRResolveSymbol(path,"il2cpp_class_get_parent");
+    ZNIRClassGetNameFn nameFn=(ZNIRClassGetNameFn)ZNIRResolveSymbol(path,"il2cpp_class_get_name");
+    ZNIRGetMethodFn getMethod=(ZNIRGetMethodFn)ZNIRResolveSymbol(path,"il2cpp_class_get_method_from_name");
+    ZNIRMethodGetFlagsFn flagsFn=(ZNIRMethodGetFlagsFn)ZNIRResolveSymbol(path,"il2cpp_method_get_flags");
+    ZNIRRuntimeInvokeFn invoke=(ZNIRRuntimeInvokeFn)ZNIRResolveSymbol(path,"il2cpp_runtime_invoke");
+    ZNIRObjectGetClassFn objectClass=(ZNIRObjectGetClassFn)ZNIRResolveSymbol(path,"il2cpp_object_get_class");
+    ZNIRClassIsAssignableFromFn assignable=(ZNIRClassIsAssignableFromFn)ZNIRResolveSymbol(path,"il2cpp_class_is_assignable_from");
+    void *(*domainGet)(void)=(void *(*)(void))ZNIRResolveSymbol(path,"il2cpp_domain_get");
+    ZNIRThreadCurrentFn threadCurrent=(ZNIRThreadCurrentFn)ZNIRResolveSymbol(path,"il2cpp_thread_current");
+    ZNIRThreadAttachFn threadAttach=(ZNIRThreadAttachFn)ZNIRResolveSymbol(path,"il2cpp_thread_attach");
+    if(!parentFn||!nameFn||!getMethod||!flagsFn||!invoke||!objectClass||!assignable||
+       !threadCurrent||!threadAttach||!domainGet) {
+        if(error)*error=@"FAILED_SINGLETON_API：IL2CPP 单例所需 API 不完整";
+        return NULL;
+    }
+    // Strict first release: only a directly-derived PersistentSingleton<T>.
+    // Do not invoke arbitrary Instance properties or construct Unity components.
+    void *parent=parentFn(klass);
+    const char *parentName=parent?nameFn(parent):NULL;
+    if(!parentName||strncmp(parentName,"PersistentSingleton",19)!=0) {
+        if(error)*error=@"FAILED_SINGLETON_UNSUPPORTED：不是 PersistentSingleton<T> 直接子类";
+        return NULL;
+    }
+    const void *getter=getMethod(klass,"get_Instance",0);
+    uint32_t iflags=0;
+    if(!getter || !(flagsFn(getter,&iflags)&0x10u)) {
+        if(error)*error=@"FAILED_SINGLETON_GETTER：缺少静态 get_Instance";
+        return NULL;
+    }
+    if(!threadCurrent()) {
+        void *domain=domainGet();
+        if(!domain||!threadAttach(domain)) {
+            if(error)*error=@"FAILED_SINGLETON_THREAD：线程附加失败";
+            return NULL;
+        }
+    }
+    void *exception=NULL;
+    void *obj=invoke(getter,NULL,NULL,&exception);
+    if(exception||!obj) {
+        if(error)*error=exception?@"FAILED_SINGLETON_EXCEPTION：get_Instance 托管异常":
+                                   @"FAILED_SINGLETON_NULL：get_Instance 返回空";
+        return NULL;
+    }
+    void *actual=objectClass(obj);
+    if(!actual || !assignable(klass,actual)) {
+        if(error)*error=@"FAILED_SINGLETON_TYPE：返回对象类型不匹配";
+        return NULL;
+    }
+    if(diagnostics)*diagnostics=[NSString stringWithFormat:@"PersistentSingleton<T>.Instance · %@.%@",
+                                ns?:@"",className?:@""];
+    if(error)*error=nil;
+    return obj;
+}
+
 @implementation ZNIL2CPPInstanceResolver
 
 + (instancetype)sharedResolver {
@@ -212,6 +286,21 @@ static void *ZNIRReallocate(void *ptr, size_t size, void *userdata) {
                                                                 error:&innerError];
     if (diagnostics) *diagnostics = diag;
     if (!items.count) {
+        // Only fall back after a genuine zero-result/unsupported liveness search.
+        // Never override invalid-class or other resolver errors.
+        if (!innerError || [innerError hasPrefix:@"FAILED_INSTANCE_LIVENESS"]) {
+            NSString *singletonDiag=nil, *singletonError=nil;
+            void *singleton=ZNIRPersistentSingleton(assembly,namespaceName,className,
+                                                    &singletonDiag,&singletonError);
+            if(singleton) {
+                if(diagnostics)*diagnostics=singletonDiag;
+                if(error)*error=nil;
+                [[ZNRuntimeLogger sharedLogger] log:[@"[instance-resolver] " stringByAppendingString:singletonDiag?:@"singleton resolved"]];
+                return singleton;
+            }
+            if(diagnostics)*diagnostics=[NSString stringWithFormat:@"%@ · %@",
+                                        diag?:@"no liveness instances",singletonError?:@"singleton unavailable"];
+        }
         if (error) *error = innerError ?: [NSString stringWithFormat:@"FAILED_INSTANCE_NOT_FOUND：%@.%@ 没有活实例", namespaceName ?: @"", className ?: @""];
         return NULL;
     }
