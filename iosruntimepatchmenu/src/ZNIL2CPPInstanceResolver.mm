@@ -234,6 +234,134 @@ static void *ZNIRResolveSingletonManually(NSString *assembly, NSString *ns, NSSt
     return object;
 }
 
+
+// Explicit MonoBehaviour scene lookup, separate from the normal Invoke Engine.
+// FindObjectsOfType(Type) is a Unity managed API and must run on the main thread.
+typedef void *(*ZNIRClassFromNameFn)(const void *,const char *,const char *);
+typedef const void **(*ZNIRAssembliesFn)(const void *,size_t *);
+typedef void *(*ZNIRAssemblyImageFn)(const void *);
+typedef void *(*ZNIRClassGetTypeFn)(void *);
+typedef void *(*ZNIRTypeGetObjectFn)(const void *);
+typedef uint32_t (*ZNIRMethodParamCountFn)(const void *);
+typedef const void *(*ZNIRMethodGetParamFn)(const void *,uint32_t);
+typedef char *(*ZNIRTypeGetNameFn)(const void *);
+typedef size_t (*ZNIRArrayLengthFn)(const void *);
+typedef void *(*ZNIRArrayAddrFn)(void *,int,uintptr_t);
+typedef void (*ZNIRFreeFn)(void *);
+
+static BOOL ZNIRClassDerivesFrom(void *klass, const char *parentName,
+                               const char *parentNamespace, NSString *path) {
+    ZNIRClassGetParentFn getParent=(ZNIRClassGetParentFn)ZNIRResolveSymbol(path,"il2cpp_class_get_parent");
+    ZNIRClassGetNameFn getName=(ZNIRClassGetNameFn)ZNIRResolveSymbol(path,"il2cpp_class_get_name");
+    const char *(*getNS)(void *)=(const char *(*)(void *))ZNIRResolveSymbol(path,"il2cpp_class_get_namespace");
+    if (!getParent||!getName||!getNS) return NO;
+    for (NSUInteger i=0; klass && i<64;i++) {
+        const char *n=getName(klass),*ns=getNS(klass);
+        if (n&&ns&&strcmp(n,parentName)==0&&strcmp(ns,parentNamespace)==0) return YES;
+        void *next=getParent(klass);
+        if(next==klass) break;
+        klass=next;
+    }
+    return NO;
+}
+
+static void *ZNIRSceneMonoBehaviour(NSString *assembly,NSString *ns,NSString *className,
+                                    NSString **diagnostics,NSString **error) {
+    if (![NSThread isMainThread]) {
+        if(error)*error=@"FAILED_SCENE_THREAD：Unity 场景查询需要主线程";
+        return NULL;
+    }
+    ZNIL2CPPResolver *resolver=[ZNIL2CPPResolver sharedResolver];
+    [resolver refresh];
+    NSString *path=resolver.unityPath?:@"";
+    NSDictionary *resolved=[resolver resolveClassAssembly:assembly namespace:ns?:@"" className:className];
+    void *klass=(void *)(uintptr_t)[resolved[@"class"] unsignedLongLongValue];
+    if (!klass || !ZNIRClassDerivesFrom(klass,"MonoBehaviour","UnityEngine",path)) {
+        if(error)*error=@"FAILED_SCENE_CLASS：目标不是 MonoBehaviour";
+        return NULL;
+    }
+    void *(*domainGet)(void)=(void *(*)(void))ZNIRResolveSymbol(path,"il2cpp_domain_get");
+    ZNIRAssembliesFn assembliesFn=(ZNIRAssembliesFn)ZNIRResolveSymbol(path,"il2cpp_domain_get_assemblies");
+    ZNIRAssemblyImageFn getImage=(ZNIRAssemblyImageFn)ZNIRResolveSymbol(path,"il2cpp_assembly_get_image");
+    ZNIRClassFromNameFn classFromName=(ZNIRClassFromNameFn)ZNIRResolveSymbol(path,"il2cpp_class_from_name");
+    ZNIRClassGetTypeFn classGetType=(ZNIRClassGetTypeFn)ZNIRResolveSymbol(path,"il2cpp_class_get_type");
+    ZNIRTypeGetObjectFn typeGetObject=(ZNIRTypeGetObjectFn)ZNIRResolveSymbol(path,"il2cpp_type_get_object");
+    ZNIRGetMethodFn getMethod=(ZNIRGetMethodFn)ZNIRResolveSymbol(path,"il2cpp_class_get_method_from_name");
+    ZNIRMethodGetFlagsFn flagsFn=(ZNIRMethodGetFlagsFn)ZNIRResolveSymbol(path,"il2cpp_method_get_flags");
+    ZNIRMethodParamCountFn paramCount=(ZNIRMethodParamCountFn)ZNIRResolveSymbol(path,"il2cpp_method_get_param_count");
+    ZNIRMethodGetParamFn methodParam=(ZNIRMethodGetParamFn)ZNIRResolveSymbol(path,"il2cpp_method_get_param");
+    ZNIRTypeGetNameFn typeName=(ZNIRTypeGetNameFn)ZNIRResolveSymbol(path,"il2cpp_type_get_name");
+    ZNIRFreeFn freeName=(ZNIRFreeFn)ZNIRResolveSymbol(path,"il2cpp_free");
+    ZNIRRuntimeInvokeFn invoke=(ZNIRRuntimeInvokeFn)ZNIRResolveSymbol(path,"il2cpp_runtime_invoke");
+    ZNIRArrayLengthFn arrayLength=(ZNIRArrayLengthFn)ZNIRResolveSymbol(path,"il2cpp_array_length");
+    ZNIRArrayAddrFn arrayAddr=(ZNIRArrayAddrFn)ZNIRResolveSymbol(path,"il2cpp_array_addr_with_size");
+    ZNIRObjectGetClassFn objectClass=(ZNIRObjectGetClassFn)ZNIRResolveSymbol(path,"il2cpp_object_get_class");
+    ZNIRClassIsAssignableFromFn assignable=(ZNIRClassIsAssignableFromFn)ZNIRResolveSymbol(path,"il2cpp_class_is_assignable_from");
+    if (!domainGet||!assembliesFn||!getImage||!classFromName||!classGetType||
+        !typeGetObject||!getMethod||!flagsFn||!paramCount||!methodParam||!typeName||
+        !freeName||!invoke||!arrayLength||!arrayAddr||!objectClass||!assignable) {
+        if(error)*error=@"FAILED_SCENE_API：Unity 场景查询 API 不完整";
+        return NULL;
+    }
+    const void *type=classGetType(klass);
+    void *reflectionType=type?typeGetObject(type):NULL;
+    if (!reflectionType) { if(error)*error=@"FAILED_SCENE_TYPE：无法构建 System.Type";return NULL; }
+
+    void *domain=domainGet();
+    size_t assemblyCount=0;
+    const void **assemblies=domain?assembliesFn(domain,&assemblyCount):NULL;
+    if(!assemblies||assemblyCount>8192) {if(error)*error=@"FAILED_SCENE_ASSEMBLY：程序集不可用";return NULL;}
+    void *unityObject=NULL;
+    for(size_t i=0;i<assemblyCount && !unityObject;i++) {
+        const void *image=getImage(assemblies[i]);
+        if(image)unityObject=classFromName(image,"UnityEngine","Object");
+    }
+    if(!unityObject) {if(error)*error=@"FAILED_SCENE_OBJECT：未找到 UnityEngine.Object";return NULL;}
+
+    const void *method=getMethod(unityObject,"FindObjectsOfType",1);
+    uint32_t impl=0;
+    if(!method||paramCount(method)!=1||!(flagsFn(method,&impl)&0x10u)) {
+        if(error)*error=@"FAILED_SCENE_METHOD：当前 Unity 不支持 FindObjectsOfType(Type)";
+        return NULL;
+    }
+    const void *pType=methodParam(method,0);
+    char *name=pType?typeName(pType):NULL;
+    BOOL typeOK=name&&strcmp(name,"System.Type")==0;
+    if(name)freeName(name);
+    if(!typeOK) {if(error)*error=@"FAILED_SCENE_SIGNATURE：查找方法参数不是 System.Type";return NULL;}
+    void *params[1]={reflectionType};
+    void *exception=NULL;
+    void *array=invoke(method,NULL,params,&exception);
+    if(exception||!array) {
+        if(error)*error=exception?@"FAILED_SCENE_EXCEPTION：场景查询抛出异常":
+                                   @"FAILED_SCENE_NULL：场景查询未返回数组";
+        return NULL;
+    }
+    size_t count=arrayLength(array);
+    if(count>4096) {if(error)*error=@"FAILED_SCENE_COUNT：结果数量异常";return NULL;}
+    void *unique=NULL;
+    NSUInteger validCount=0;
+    for(size_t i=0;i<count;i++){
+        void *slot=arrayAddr(array,(int)sizeof(void *),(uintptr_t)i);
+        if(!slot)continue;
+        void *candidate=*(void **)slot;
+        if(!candidate)continue;
+        void *actual=objectClass(candidate);
+        if(!actual||!assignable(klass,actual))continue;
+        unique=candidate;
+        validCount++;
+        if(validCount>1)break;
+    }
+    if(validCount!=1) {
+        if(error)*error=validCount>1?@"FAILED_SCENE_AMBIGUOUS：发现多个实例，请使用实例选择":
+                                   @"FAILED_SCENE_NOT_FOUND：当前场景没有匹配的活组件";
+        return NULL;
+    }
+    if(diagnostics)*diagnostics=[NSString stringWithFormat:@"Unity scene FindObjectsOfType · %@ · 1 instance",className?:@""];
+    if(error)*error=nil;
+    return unique;
+}
+
 @implementation ZNIL2CPPInstanceResolver
 
 + (instancetype)sharedResolver {
@@ -397,6 +525,38 @@ static void *ZNIRResolveSingletonManually(NSString *assembly, NSString *ns, NSSt
                                           error:(NSString **)error {
     // Explicit UI action only; never invoked from normal instance resolution.
     return ZNIRResolveSingletonManually(assembly, namespaceName, className, diagnostics, error);
+}
+
+- (void *)resolveManualInstanceForAssembly:(NSString *)assembly
+                                 namespace:(NSString *)namespaceName
+                                 className:(NSString *)className
+                               diagnostics:(NSString **)diagnostics
+                                     error:(NSString **)error {
+    // Opt-in button only: scene components first; singleton lookup remains separate
+    // and is never injected into the regular runtime method invocation path.
+    NSString *sceneError=nil,*sceneDiag=nil;
+    void *scene=ZNIRSceneMonoBehaviour(assembly,namespaceName,className,&sceneDiag,&sceneError);
+    if(scene) {
+        if(diagnostics)*diagnostics=sceneDiag;
+        if(error)*error=nil;
+        return scene;
+    }
+    // Do not bypass an ambiguous scene search by choosing a singleton.
+    if([sceneError hasPrefix:@"FAILED_SCENE_AMBIGUOUS"]) {
+        if(error)*error=sceneError;
+        return NULL;
+    }
+    NSString *singletonDiag=nil,*singletonError=nil;
+    void *singleton=ZNIRResolveSingletonManually(assembly,namespaceName,className,
+                                                &singletonDiag,&singletonError);
+    if(singleton) {
+        if(diagnostics)*diagnostics=singletonDiag;
+        if(error)*error=nil;
+        return singleton;
+    }
+    if(error)*error=[NSString stringWithFormat:@"%@；%@",
+                      sceneError?:@"场景查找不可用",singletonError?:@"单例查找不可用"];
+    return NULL;
 }
 
 @end
