@@ -22,6 +22,14 @@ NS_ASSUME_NONNULL_BEGIN
                                                diagnostics:(NSString * _Nullable * _Nullable)diagnostics
                                                      error:(NSString * _Nullable * _Nullable)error;
 
+// Explicit user-triggered resolution: try a MonoBehaviour scene component first,
+// then the existing opt-in singleton strategies. Never used by automatic Invoke.
+- (void * _Nullable)resolveManualInstanceForAssembly:(NSString *)assembly
+                                            namespace:(NSString *)namespaceName
+                                            className:(NSString *)className
+                                          diagnostics:(NSString * _Nullable * _Nullable)diagnostics
+                                                error:(NSString * _Nullable * _Nullable)error;
+
 @end
 
 NS_ASSUME_NONNULL_END
