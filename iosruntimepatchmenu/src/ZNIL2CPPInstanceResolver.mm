@@ -4,6 +4,7 @@
 #import <dlfcn.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 
 // M4.3 Instance Resolver V1
 // - Prefer the legacy begin/end liveness path when Unity exports it.
@@ -245,8 +246,18 @@ typedef void *(*ZNIRTypeGetObjectFn)(const void *);
 typedef uint32_t (*ZNIRMethodParamCountFn)(const void *);
 typedef const void *(*ZNIRMethodGetParamFn)(const void *,uint32_t);
 typedef char *(*ZNIRTypeGetNameFn)(const void *);
-typedef size_t (*ZNIRArrayLengthFn)(const void *);
-typedef void *(*ZNIRArrayAddrFn)(void *,int,uintptr_t);
+// Unity libil2cpp defines il2cpp_array_length / il2cpp_array_addr_with_size
+// as macros, not mandatory dynamically exported functions.
+// This is the ARM64 Il2CppArraySize object layout used by Unity IL2CPP.
+typedef struct {
+    void *klass;
+    void *monitor;
+    void *bounds;
+    uintptr_t maxLength;
+    void *vector[0];
+} ZNIRManagedObjectArray;
+static_assert(offsetof(ZNIRManagedObjectArray, vector) == 32,
+              "Unexpected arm64 IL2CPP object array layout");
 typedef void (*ZNIRFreeFn)(void *);
 
 static BOOL ZNIRClassDerivesFrom(void *klass, const char *parentName,
@@ -293,13 +304,11 @@ static void *ZNIRSceneMonoBehaviour(NSString *assembly,NSString *ns,NSString *cl
     ZNIRTypeGetNameFn typeName=(ZNIRTypeGetNameFn)ZNIRResolveSymbol(path,"il2cpp_type_get_name");
     ZNIRFreeFn freeName=(ZNIRFreeFn)ZNIRResolveSymbol(path,"il2cpp_free");
     ZNIRRuntimeInvokeFn invoke=(ZNIRRuntimeInvokeFn)ZNIRResolveSymbol(path,"il2cpp_runtime_invoke");
-    ZNIRArrayLengthFn arrayLength=(ZNIRArrayLengthFn)ZNIRResolveSymbol(path,"il2cpp_array_length");
-    ZNIRArrayAddrFn arrayAddr=(ZNIRArrayAddrFn)ZNIRResolveSymbol(path,"il2cpp_array_addr_with_size");
     ZNIRObjectGetClassFn objectClass=(ZNIRObjectGetClassFn)ZNIRResolveSymbol(path,"il2cpp_object_get_class");
     ZNIRClassIsAssignableFromFn assignable=(ZNIRClassIsAssignableFromFn)ZNIRResolveSymbol(path,"il2cpp_class_is_assignable_from");
     if (!domainGet||!assembliesFn||!getImage||!classFromName||!classGetType||
         !typeGetObject||!getMethod||!flagsFn||!paramCount||!methodParam||!typeName||
-        !freeName||!invoke||!arrayLength||!arrayAddr||!objectClass||!assignable) {
+        !freeName||!invoke||!objectClass||!assignable) {
         if(error)*error=@"FAILED_SCENE_API：Unity 场景查询 API 不完整";
         return NULL;
     }
@@ -337,14 +346,17 @@ static void *ZNIRSceneMonoBehaviour(NSString *assembly,NSString *ns,NSString *cl
                                    @"FAILED_SCENE_NULL：场景查询未返回数组";
         return NULL;
     }
-    size_t count=arrayLength(array);
+    ZNIRManagedObjectArray *resultArray=(ZNIRManagedObjectArray *)array;
+    if (resultArray->bounds) {
+        if(error)*error=@"FAILED_SCENE_ARRAY：查询结果不是一维零基数组";
+        return NULL;
+    }
+    size_t count=(size_t)resultArray->maxLength;
     if(count>4096) {if(error)*error=@"FAILED_SCENE_COUNT：结果数量异常";return NULL;}
     void *unique=NULL;
     NSUInteger validCount=0;
     for(size_t i=0;i<count;i++){
-        void *slot=arrayAddr(array,(int)sizeof(void *),(uintptr_t)i);
-        if(!slot)continue;
-        void *candidate=*(void **)slot;
+        void *candidate=resultArray->vector[i];
         if(!candidate)continue;
         void *actual=objectClass(candidate);
         if(!actual||!assignable(klass,actual))continue;
