@@ -289,6 +289,7 @@ static void *ZNIRPersistentSingleton(NSString *assembly, NSString *ns, NSString 
     if (!items.count) {
         // Only fall back after a genuine zero-result/unsupported liveness search.
         // Never override invalid-class or other resolver errors.
+        NSString *fallbackError=nil;
         if (!innerError || [innerError hasPrefix:@"FAILED_INSTANCE_LIVENESS"]) {
             NSString *singletonDiag=nil, *singletonError=nil;
             void *singleton=ZNIRPersistentSingleton(assembly,namespaceName,className,
@@ -299,10 +300,11 @@ static void *ZNIRPersistentSingleton(NSString *assembly, NSString *ns, NSString 
                 [[ZNRuntimeLogger sharedLogger] log:[@"[instance-resolver] " stringByAppendingString:singletonDiag?:@"singleton resolved"]];
                 return singleton;
             }
+            fallbackError=singletonError;
             if(diagnostics)*diagnostics=[NSString stringWithFormat:@"%@ · %@",
                                         diag?:@"no liveness instances",singletonError?:@"singleton unavailable"];
         }
-        if (error) *error = innerError ?: [NSString stringWithFormat:@"FAILED_INSTANCE_NOT_FOUND：%@.%@ 没有活实例", namespaceName ?: @"", className ?: @""];
+        if (error) *error = fallbackError ?: innerError ?: [NSString stringWithFormat:@"FAILED_INSTANCE_NOT_FOUND：%@.%@ 没有活实例", namespaceName ?: @"", className ?: @""];
         return NULL;
     }
     if (items.count != 1) {
