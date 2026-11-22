@@ -13047,6 +13047,14 @@ static NSDictionary *ZNM54AnalyzeCandidate(NSDictionary *candidate) {
     addField(@"Assembly",candidate[@"assembly"]?:@"",YES);
     addField(@"Namespace",candidate[@"namespace"]?:@"",YES);
     addField(@"Class",candidate[@"class"]?:@"",YES);
+    NSDictionary<NSString *,NSString *> *inheritance =
+        [[ZNIL2CPPHybridFinder sharedFinder] zn60_parentClassesForCandidate:candidate];
+    NSString *directParent = inheritance[@"parent"] ?: @"未解析";
+    NSString *parentBase = inheritance[@"parentBase"] ?: @"未解析";
+    addField(@"Parent Class",directParent,
+             ![directParent isEqualToString:@"—"] && ![directParent isEqualToString:@"未解析"]);
+    addField(@"Parent Base Class",parentBase,
+             ![parentBase isEqualToString:@"—"] && ![parentBase isEqualToString:@"未解析"]);
     addField(@"Method",[NSString stringWithFormat:@"%@/%@",candidate[@"method"]?:@"?",candidate[@"argumentCount"]?:@0],YES);
     addField(@"RVA",candidate[@"rvaText"]?:@"—",[candidate[@"addressResolved"] boolValue]);
     unsigned long long methodInfo=[candidate[@"methodInfo"] unsignedLongLongValue];
