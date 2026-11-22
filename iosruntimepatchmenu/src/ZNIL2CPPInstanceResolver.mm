@@ -69,77 +69,169 @@ static void *ZNIRReallocate(void *ptr, size_t size, void *userdata) {
 }
 
 
+
 typedef void *(*ZNIRClassGetParentFn)(void *);
 typedef const char *(*ZNIRClassGetNameFn)(void *);
 typedef const void *(*ZNIRGetMethodFn)(void *, const char *, int);
 typedef uint32_t (*ZNIRMethodGetFlagsFn)(const void *, uint32_t *);
+typedef const void *(*ZNIRMethodGetReturnTypeFn)(const void *);
+typedef void *(*ZNIRClassFromTypeFn)(const void *);
 typedef void *(*ZNIRRuntimeInvokeFn)(const void *, void *, void **, void **);
 typedef void *(*ZNIRThreadCurrentFn)(void);
 typedef void *(*ZNIRThreadAttachFn)(void *);
+typedef void *(*ZNIRGetFieldFn)(void *, const char *);
+typedef int (*ZNIRFieldGetFlagsFn)(const void *);
+typedef const void *(*ZNIRFieldGetTypeFn)(const void *);
+typedef void (*ZNIRStaticFieldGetValueFn)(const void *, void *);
 
-static void *ZNIRPersistentSingleton(NSString *assembly, NSString *ns, NSString *className,
-                                     NSString **diagnostics, NSString **error) {
-    ZNIL2CPPResolver *resolver = [ZNIL2CPPResolver sharedResolver];
+typedef struct {
+    void *klass;
+    void *(*parent)(void *);
+    const char *(*name)(void *);
+    const void *(*method)(void *,const char *,int);
+    uint32_t (*methodFlags)(const void *,uint32_t *);
+    const void *(*methodReturnType)(const void *);
+    void *(*classFromType)(const void *);
+    ZNIRRuntimeInvokeFn invoke;
+    ZNIRObjectGetClassFn objectClass;
+    ZNIRClassIsAssignableFromFn assignable;
+    ZNIRGetFieldFn field;
+    ZNIRFieldGetFlagsFn fieldFlags;
+    ZNIRFieldGetTypeFn fieldType;
+    ZNIRStaticFieldGetValueFn staticFieldValue;
+} ZNIRSingletonAPI;
+
+static BOOL ZNIRSupportedSingletonBase(const char *name) {
+    if (!name) return NO;
+    static const char *patterns[] = {"PersistentSingleton", "MonoSingleton", "Singleton"};
+    for (size_t i=0;i<sizeof(patterns)/sizeof(patterns[0]);i++) {
+        size_t n=strlen(patterns[i]);
+        if (strncmp(name,patterns[i],n)==0 &&
+            (name[n]=='\\0'||name[n]=='`'||name[n]=='<')) return YES;
+    }
+    return NO;
+}
+
+static BOOL ZNIRValidateSingleton(void *object, ZNIRSingletonAPI *api) {
+    if (!object || !api->objectClass || !api->assignable) return NO;
+    void *actual=api->objectClass(object);
+    return actual && api->assignable(api->klass,actual);
+}
+
+// Read-only static fields first. Never initialize or allocate an object.
+static void *ZNIRReadSingletonField(ZNIRSingletonAPI *api, void *owner, NSString **strategy) {
+    if (!api->field || !api->fieldFlags || !api->fieldType ||
+        !api->classFromType || !api->staticFieldValue) return NULL;
+    const char *names[]={"Instance","instance","_instance","s_Instance","s_instance"};
+    for (size_t i=0;i<sizeof(names)/sizeof(names[0]);i++) {
+        void *field=api->field(owner,names[i]);
+        if (!field || !(api->fieldFlags(field)&0x10)) continue;
+        const void *type=api->fieldType(field);
+        void *fieldClass=type?api->classFromType(type):NULL;
+        // Prevent reading primitive/struct static fields as Il2CppObject*.
+        if (!fieldClass || !api->assignable(fieldClass,api->klass)) continue;
+        void *object=NULL;
+        api->staticFieldValue(field,&object);
+        if (!ZNIRValidateSingleton(object,api)) continue;
+        if (strategy) *strategy=[NSString stringWithFormat:@"static-field:%s",names[i]];
+        return object;
+    }
+    return NULL;
+}
+
+static void *ZNIRResolveSingletonManually(NSString *assembly, NSString *ns, NSString *className,
+                                           NSString **diagnostics, NSString **error) {
+    ZNIL2CPPResolver *resolver=[ZNIL2CPPResolver sharedResolver];
     [resolver refresh];
-    NSDictionary *info = [resolver resolveClassAssembly:assembly namespace:ns ?: @"" className:className];
-    void *klass = (void *)(uintptr_t)[info[@"class"] unsignedLongLongValue];
-    if (!klass) {
-        if(error)*error=@"FAILED_SINGLETON_CLASS：无法解析类";
+    NSDictionary *info=[resolver resolveClassAssembly:assembly namespace:ns?:@"" className:className];
+    void *klass=(void *)(uintptr_t)[info[@"class"] unsignedLongLongValue];
+    if (!klass) { if(error)*error=@"FAILED_SINGLETON_CLASS：无法解析目标类"; return NULL; }
+    NSString *path=resolver.unityPath?:@"";
+    ZNIRSingletonAPI api={};
+    api.klass=klass;
+    api.parent=(ZNIRClassGetParentFn)ZNIRResolveSymbol(path,"il2cpp_class_get_parent");
+    api.name=(ZNIRClassGetNameFn)ZNIRResolveSymbol(path,"il2cpp_class_get_name");
+    api.method=(ZNIRGetMethodFn)ZNIRResolveSymbol(path,"il2cpp_class_get_method_from_name");
+    api.methodFlags=(ZNIRMethodGetFlagsFn)ZNIRResolveSymbol(path,"il2cpp_method_get_flags");
+    api.methodReturnType=(ZNIRMethodGetReturnTypeFn)ZNIRResolveSymbol(path,"il2cpp_method_get_return_type");
+    api.classFromType=(ZNIRClassFromTypeFn)ZNIRResolveSymbol(path,"il2cpp_class_from_type");
+    api.invoke=(ZNIRRuntimeInvokeFn)ZNIRResolveSymbol(path,"il2cpp_runtime_invoke");
+    api.objectClass=(ZNIRObjectGetClassFn)ZNIRResolveSymbol(path,"il2cpp_object_get_class");
+    api.assignable=(ZNIRClassIsAssignableFromFn)ZNIRResolveSymbol(path,"il2cpp_class_is_assignable_from");
+    api.field=(ZNIRGetFieldFn)ZNIRResolveSymbol(path,"il2cpp_class_get_field_from_name");
+    api.fieldFlags=(ZNIRFieldGetFlagsFn)ZNIRResolveSymbol(path,"il2cpp_field_get_flags");
+    api.fieldType=(ZNIRFieldGetTypeFn)ZNIRResolveSymbol(path,"il2cpp_field_get_type");
+    api.staticFieldValue=(ZNIRStaticFieldGetValueFn)ZNIRResolveSymbol(path,"il2cpp_field_static_get_value");
+    if (!api.parent || !api.name || !api.objectClass || !api.assignable) {
+        if(error)*error=@"FAILED_SINGLETON_API：类型校验 API 不完整";
         return NULL;
     }
-    NSString *path=resolver.unityPath ?: @"";
-    ZNIRClassGetParentFn parentFn=(ZNIRClassGetParentFn)ZNIRResolveSymbol(path,"il2cpp_class_get_parent");
-    ZNIRClassGetNameFn nameFn=(ZNIRClassGetNameFn)ZNIRResolveSymbol(path,"il2cpp_class_get_name");
-    ZNIRGetMethodFn getMethod=(ZNIRGetMethodFn)ZNIRResolveSymbol(path,"il2cpp_class_get_method_from_name");
-    ZNIRMethodGetFlagsFn flagsFn=(ZNIRMethodGetFlagsFn)ZNIRResolveSymbol(path,"il2cpp_method_get_flags");
-    ZNIRRuntimeInvokeFn invoke=(ZNIRRuntimeInvokeFn)ZNIRResolveSymbol(path,"il2cpp_runtime_invoke");
-    ZNIRObjectGetClassFn objectClass=(ZNIRObjectGetClassFn)ZNIRResolveSymbol(path,"il2cpp_object_get_class");
-    ZNIRClassIsAssignableFromFn assignable=(ZNIRClassIsAssignableFromFn)ZNIRResolveSymbol(path,"il2cpp_class_is_assignable_from");
+
+    BOOL trustedBase=NO;
+    NSString *fieldStrategy=nil;
+    void *object=NULL;
+    void *owner=klass;
+    // A short, bounded walk avoids cyclic/corrupt hierarchy metadata.
+    for (NSUInteger depth=0; owner && depth<32; depth++) {
+        if (depth && ZNIRSupportedSingletonBase(api.name(owner))) trustedBase=YES;
+        object=ZNIRReadSingletonField(&api,owner,&fieldStrategy);
+        if(object) {
+            if(diagnostics)*diagnostics=[NSString stringWithFormat:@"Singleton %@ (%@)",
+                                        fieldStrategy?:@"static field",className?:@""];
+            if(error)*error=nil;
+            return object;
+        }
+        void *next=api.parent(owner);
+        if(next==owner) break;
+        owner=next;
+    }
+
+    // Explicit-button getter fallback ONLY for known singleton base patterns.
+    // Getters can create instances; arbitrary properties must never be invoked.
+    if (!trustedBase) {
+        if(error)*error=@"FAILED_SINGLETON_UNSUPPORTED：未找到有效静态实例字段或已识别 Singleton 基类";
+        return NULL;
+    }
+    if(!api.method||!api.methodFlags||!api.invoke||!api.methodReturnType||!api.classFromType) {
+        if(error)*error=@"FAILED_SINGLETON_GETTER_API：getter 元数据 API 不完整";
+        return NULL;
+    }
+    const void *getter=api.method(klass,"get_Instance",0);
+    uint32_t impl=0;
+    if(!getter||!(api.methodFlags(getter,&impl)&0x10u)) {
+        if(error)*error=@"FAILED_SINGLETON_GETTER：静态 get_Instance 不存在";
+        return NULL;
+    }
+    const void *returnType=api.methodReturnType(getter);
+    void *returnClass=returnType?api.classFromType(returnType):NULL;
+    if(!returnClass || !api.assignable(returnClass,klass)) {
+        if(error)*error=@"FAILED_SINGLETON_RETURN_TYPE：getter 返回类型不兼容目标类";
+        return NULL;
+    }
+    ZNIRThreadCurrentFn current=(ZNIRThreadCurrentFn)ZNIRResolveSymbol(path,"il2cpp_thread_current");
+    ZNIRThreadAttachFn attach=(ZNIRThreadAttachFn)ZNIRResolveSymbol(path,"il2cpp_thread_attach");
     void *(*domainGet)(void)=(void *(*)(void))ZNIRResolveSymbol(path,"il2cpp_domain_get");
-    ZNIRThreadCurrentFn threadCurrent=(ZNIRThreadCurrentFn)ZNIRResolveSymbol(path,"il2cpp_thread_current");
-    ZNIRThreadAttachFn threadAttach=(ZNIRThreadAttachFn)ZNIRResolveSymbol(path,"il2cpp_thread_attach");
-    if(!parentFn||!nameFn||!getMethod||!flagsFn||!invoke||!objectClass||!assignable||
-       !threadCurrent||!threadAttach||!domainGet) {
-        if(error)*error=@"FAILED_SINGLETON_API：IL2CPP 单例所需 API 不完整";
+    if(!current||!attach||!domainGet) {
+        if(error)*error=@"FAILED_SINGLETON_THREAD_API：线程 API 不完整";
         return NULL;
     }
-    // Strict first release: only a directly-derived PersistentSingleton<T>.
-    // Do not invoke arbitrary Instance properties or construct Unity components.
-    void *parent=parentFn(klass);
-    const char *parentName=parent?nameFn(parent):NULL;
-    if(!parentName||strncmp(parentName,"PersistentSingleton",19)!=0) {
-        if(error)*error=@"FAILED_SINGLETON_UNSUPPORTED：不是 PersistentSingleton<T> 直接子类";
-        return NULL;
-    }
-    const void *getter=getMethod(klass,"get_Instance",0);
-    uint32_t iflags=0;
-    if(!getter || !(flagsFn(getter,&iflags)&0x10u)) {
-        if(error)*error=@"FAILED_SINGLETON_GETTER：缺少静态 get_Instance";
-        return NULL;
-    }
-    if(!threadCurrent()) {
+    if(!current()) {
         void *domain=domainGet();
-        if(!domain||!threadAttach(domain)) {
-            if(error)*error=@"FAILED_SINGLETON_THREAD：线程附加失败";
+        if(!domain||!attach(domain)) {
+            if(error)*error=@"FAILED_SINGLETON_THREAD：无法附加当前线程";
             return NULL;
         }
     }
     void *exception=NULL;
-    void *obj=invoke(getter,NULL,NULL,&exception);
-    if(exception||!obj) {
-        if(error)*error=exception?@"FAILED_SINGLETON_EXCEPTION：get_Instance 托管异常":
-                                   @"FAILED_SINGLETON_NULL：get_Instance 返回空";
+    object=api.invoke(getter,NULL,NULL,&exception);
+    if(exception || !ZNIRValidateSingleton(object,&api)) {
+        if(error)*error=exception?@"FAILED_SINGLETON_EXCEPTION：get_Instance 抛出异常":
+                                  @"FAILED_SINGLETON_NULL_OR_TYPE：getter 返回空或类型不匹配";
         return NULL;
     }
-    void *actual=objectClass(obj);
-    if(!actual || !assignable(klass,actual)) {
-        if(error)*error=@"FAILED_SINGLETON_TYPE：返回对象类型不匹配";
-        return NULL;
-    }
-    if(diagnostics)*diagnostics=[NSString stringWithFormat:@"PersistentSingleton<T>.Instance · %@.%@",
-                                ns?:@"",className?:@""];
+    if(diagnostics)*diagnostics=[NSString stringWithFormat:@"Singleton known-base getter (%@)",className?:@""];
     if(error)*error=nil;
-    return obj;
+    return object;
 }
 
 @implementation ZNIL2CPPInstanceResolver
@@ -304,7 +396,7 @@ static void *ZNIRPersistentSingleton(NSString *assembly, NSString *ns, NSString 
                                     diagnostics:(NSString **)diagnostics
                                           error:(NSString **)error {
     // Explicit UI action only; never invoked from normal instance resolution.
-    return ZNIRPersistentSingleton(assembly, namespaceName, className, diagnostics, error);
+    return ZNIRResolveSingletonManually(assembly, namespaceName, className, diagnostics, error);
 }
 
 @end
