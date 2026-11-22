@@ -15,6 +15,11 @@ NS_ASSUME_NONNULL_BEGIN
                                                                     limit:(NSUInteger)limit
                                                                    cancel:(nullable BOOL (^)(void))cancel
                                                                     error:(NSString * _Nullable * _Nullable)error;
+// Read-only immediate parent and grandparent for the selected runtime class.
+// Resolves by assembly+namespace+class; no pointers are cached or persisted.
+// Missing runtime metadata is returned as an explicit unresolved label.
+- (NSDictionary<NSString *, NSString *> *)zn60_parentClassesForCandidate:(NSDictionary<NSString *, id> *)candidate;
+
 // Resolve the selected class into existing V3 method-candidate dictionaries.
 - (nullable NSArray<NSDictionary<NSString *, id> *> *)zn64_methodsForClass:(NSDictionary<NSString *, id> *)classIdentity
                                                                      limit:(NSUInteger)limit
