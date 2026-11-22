@@ -14386,7 +14386,7 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         const CGFloat actionGap=6.0;
         const CGFloat actionTop=147.0; // P4: reserve Chinese method gloss row
         const CGFloat actionPitch=32.0;
-        const CGFloat topAreaH=actionTop+actionPitch*4.0+5.0;
+        const CGFloat topAreaH=actionTop+actionPitch*5.0+5.0;
         CGFloat paramH=argc?22.0+(CGFloat)argc*62.0:0.0;
         CGFloat statusBlockH=90.0;
         CGFloat cardH=topAreaH+paramH+statusBlockH+8.0;
@@ -14524,7 +14524,15 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
         hook.accessibilityHint=hookOK?@"Native Hook plan ready":(hookError?:@"Native Hook unsupported");
         [card addSubview:hook];
 
-        for(UIButton *b in @[test,apply,create,chain,reselect,batch,direct,hook])
+        // Separate, opt-in singleton acquisition. Never fall back implicitly
+        // from the original runtime method or Native Call paths.
+        UIButton *getInstance=[self zn40_button:@"获取实例"
+                                       selector:@selector(znm613_getSingletonInstance:)
+                                          frame:CGRectMake(x0,actionTop+actionPitch*4.0,colW,27)];
+        objc_setAssociatedObject(getInstance,ZNNativeHookCandidateAssociationKey,candidate,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [card addSubview:getInstance];
+
+        for(UIButton *b in @[test,apply,create,chain,reselect,batch,direct,hook,getInstance])
             ZNM52XStyleGridButton(b,b.frame.origin.x,b.frame.origin.y,b.frame.size.width,b.frame.size.height);
 
         ZNM613ApplyModeVisual(self,card,candidate,mode);
@@ -14961,6 +14969,42 @@ static void ZNM613SetModeForCard(ZNRuntimeMenuControllerV040 *self,UIView *card,
     [self znm65_startLiveHookStatusTimer];
 }
 
+
+// Independent manual command: get existing PersistentSingleton<T>.Instance
+// and bind it through the already-installed M4.4/M4.6.2 instance selection.
+- (void)znm613_getSingletonInstance:(UIButton *)sender {
+    NSDictionary *candidate=objc_getAssociatedObject(sender,ZNNativeHookCandidateAssociationKey);
+    if(!candidate) { ZNM613SetCandidateStatus(self,nil,@"FAILED_SINGLETON_CANDIDATE：未选择方法"); return; }
+    NSString *assembly=[candidate[@"assembly"] isKindOfClass:NSString.class]?candidate[@"assembly"]:@"";
+    NSString *ns=[candidate[@"namespace"] isKindOfClass:NSString.class]?candidate[@"namespace"]:@"";
+    NSString *className=[candidate[@"class"] isKindOfClass:NSString.class]?candidate[@"class"]:@"";
+    NSString *diagnostics=nil,*error=nil;
+    ZNIL2CPPInstanceResolver *resolver=[ZNIL2CPPInstanceResolver sharedResolver];
+    void *obj=[resolver resolvePersistentSingletonForAssembly:assembly
+                                                   namespace:ns
+                                                   className:className
+                                                 diagnostics:&diagnostics
+                                                       error:&error];
+    if(!obj) {
+        ZNM613SetCandidateStatus(self,candidate,error?:@"FAILED_SINGLETON_UNKNOWN：无法获取实例");
+        return;
+    }
+    NSString *bindingError=nil;
+    if(![resolver znm44_selectInstanceAddress:(uintptr_t)obj
+                                   assembly:assembly namespace:ns className:className
+                                      error:&bindingError]) {
+        ZNM613SetCandidateStatus(self,candidate,bindingError?:@"FAILED_SINGLETON_BIND：实例绑定失败");
+        return;
+    }
+    uintptr_t selected=[resolver znm44_selectedInstanceForAssembly:assembly namespace:ns className:className];
+    if(!selected) {
+        ZNM613SetCandidateStatus(self,candidate,@"FAILED_SINGLETON_BIND：绑定后实例地址不可用");
+        return;
+    }
+    ZNM613SetCandidateStatus(self,candidate,[NSString stringWithFormat:
+       @"获取实例成功 · %@ · 0x%llX（下次执行按现有实例校验）",
+       diagnostics?:@"PersistentSingleton", (unsigned long long)selected]);
+}
 
 - (void)zn52x_directUnavailable:(UIButton *)sender {
     NSDictionary *candidate=objc_getAssociatedObject(sender,ZNNativeHookCandidateAssociationKey);
