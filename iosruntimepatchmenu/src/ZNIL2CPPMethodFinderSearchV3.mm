@@ -38,6 +38,10 @@ typedef const void *(*ZN60ClassGetMethodsFn)(void *, void **);
 typedef const char *(*ZN60MethodGetNameFn)(const void *);
 typedef uint32_t (*ZN60MethodGetParamCountFn)(const void *);
 typedef void *(*ZN60MethodGetPointerFn)(const void *);
+typedef void *(*ZN60ClassGetParentFn)(void *);
+typedef const void *(*ZN60ClassGetTypeFn)(void *);
+typedef char *(*ZN60TypeGetNameFn)(const void *);
+typedef void (*ZN60FreeFn)(void *);
 
 typedef struct {
     void *handle;
@@ -60,6 +64,10 @@ typedef struct {
     ZN60MethodGetNameFn methodGetName;
     ZN60MethodGetParamCountFn methodGetParamCount;
     ZN60MethodGetPointerFn methodGetPointer;
+    ZN60ClassGetParentFn classGetParent;
+    ZN60ClassGetTypeFn classGetType;
+    ZN60TypeGetNameFn typeGetName;
+    ZN60FreeFn freeName;
 } ZN60Runtime;
 
 static NSString *ZN60Trim(NSString *value) {
@@ -200,6 +208,10 @@ static BOOL ZN60LoadRuntime(ZN60Runtime *runtime, NSString **error) {
     runtime->methodGetName = (ZN60MethodGetNameFn)ZN60ResolveSymbol(runtime, "il2cpp_method_get_name");
     runtime->methodGetParamCount = (ZN60MethodGetParamCountFn)ZN60ResolveSymbol(runtime, "il2cpp_method_get_param_count");
     runtime->methodGetPointer = (ZN60MethodGetPointerFn)ZN60ResolveSymbol(runtime, "il2cpp_method_get_pointer");
+    runtime->classGetParent = (ZN60ClassGetParentFn)ZN60ResolveSymbol(runtime, "il2cpp_class_get_parent");
+    runtime->classGetType = (ZN60ClassGetTypeFn)ZN60ResolveSymbol(runtime, "il2cpp_class_get_type");
+    runtime->typeGetName = (ZN60TypeGetNameFn)ZN60ResolveSymbol(runtime, "il2cpp_type_get_name");
+    runtime->freeName = (ZN60FreeFn)ZN60ResolveSymbol(runtime, "il2cpp_free");
 
     BOOL core = runtime->domainGet && runtime->domainGetAssemblies && runtime->assemblyGetImage && runtime->imageGetName &&
                 runtime->imageGetClassCount && runtime->imageGetClass && runtime->classGetName && runtime->classGetNamespace &&
@@ -383,6 +395,67 @@ static BOOL ZN60MethodMatches(ZN60Runtime *runtime,
 @end
 
 @implementation ZNIL2CPPHybridFinder (ZNMethodFinderV3Search)
+
+// Only metadata APIs. No property access, allocation, or invoke.
+static NSString *ZN60RuntimeClassTypeName(ZN60Runtime *runtime, void *klass) {
+    if (!klass) return @"—";
+    if (runtime->classGetType && runtime->typeGetName && runtime->freeName) {
+        const void *type = runtime->classGetType(klass);
+        if (type) {
+            char *raw = runtime->typeGetName(type);
+            NSString *name = raw ? ZN60String(raw) : @"";
+            if (raw) runtime->freeName(raw);
+            if (name.length) return name;
+        }
+    }
+    NSString *name = runtime->classGetName ? ZN60String(runtime->classGetName(klass)) : @"";
+    NSString *ns = runtime->classGetNamespace ? ZN60String(runtime->classGetNamespace(klass)) : @"";
+    if (!name.length) return @"未解析";
+    return ns.length ? [NSString stringWithFormat:@"%@.%@", ns, name] : name;
+}
+
+- (NSDictionary<NSString *, NSString *> *)zn60_parentClassesForCandidate:(NSDictionary<NSString *, id> *)candidate {
+    NSString *assembly = [candidate[@"assembly"] isKindOfClass:NSString.class] ? candidate[@"assembly"] : @"";
+    NSString *ns = [candidate[@"namespace"] isKindOfClass:NSString.class] ? candidate[@"namespace"] : @"";
+    NSString *name = [candidate[@"class"] isKindOfClass:NSString.class] ? candidate[@"class"] : @"";
+    NSDictionary *unresolved = @{@"parent":@"未解析", @"parentBase":@"未解析"};
+    if (!assembly.length || !name.length) return unresolved;
+    ZN60Runtime runtime = {};
+    if (!ZN60LoadRuntime(&runtime, NULL)) return unresolved;
+    if (!runtime.classGetParent) { ZN60CloseRuntime(&runtime); return unresolved; }
+    size_t count = 0;
+    const void **assemblies = ZN60Assemblies(&runtime, &count);
+    if (!assemblies || count > 8192) { ZN60CloseRuntime(&runtime); return unresolved; }
+    void *klass = NULL;
+    for (size_t i=0; i<count && !klass; i++) {
+        const void *image = runtime.assemblyGetImage(assemblies[i]);
+        if (!image || !ZN60AssemblyMatches(ZN60String(runtime.imageGetName(image)),assembly)) continue;
+        if (runtime.classFromName) klass = runtime.classFromName(image,ns.UTF8String,name.UTF8String);
+        if (!klass) {
+            size_t n = runtime.imageGetClassCount(image);
+            for(size_t j=0; j<n; j++) {
+                void *item = runtime.imageGetClass(image,j);
+                if (item && [ZN60String(runtime.classGetName(item)) isEqualToString:name] &&
+                    [ZN60String(runtime.classGetNamespace(item)) isEqualToString:ns]) {
+                    klass = item; break;
+                }
+            }
+        }
+    }
+    NSString *parent = @"未解析";
+    NSString *parentBase = @"未解析";
+    if (klass) {
+        void *p = runtime.classGetParent(klass);
+        if (!p) { parent = @"—"; parentBase = @"—"; }
+        else {
+            parent = ZN60RuntimeClassTypeName(&runtime,p);
+            void *gp = runtime.classGetParent(p);
+            parentBase = gp ? ZN60RuntimeClassTypeName(&runtime,gp) : @"—";
+        }
+    }
+    ZN60CloseRuntime(&runtime);
+    return @{@"parent":parent, @"parentBase":parentBase};
+}
 
 static NSInteger ZN64ClassRank(NSString *name, NSString *query) {
     if (ZN60CaseEqual(name,query)) return 0;
