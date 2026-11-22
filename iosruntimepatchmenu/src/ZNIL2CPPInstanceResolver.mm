@@ -107,7 +107,7 @@ static BOOL ZNIRSupportedSingletonBase(const char *name) {
     for (size_t i=0;i<sizeof(patterns)/sizeof(patterns[0]);i++) {
         size_t n=strlen(patterns[i]);
         if (strncmp(name,patterns[i],n)==0 &&
-            (name[n]=='\\0'||name[n]=='`'||name[n]=='<')) return YES;
+            (name[n]=='\0'||name[n]=='`'||name[n]=='<')) return YES;
     }
     return NO;
 }
