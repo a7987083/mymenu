@@ -98,6 +98,37 @@ int main(){
     why=nullptr;
     if(znmacho::shiftLinkedit(compact.data(),compact.size(),0x4000,0x4000,&why,1))return 8;
     if(compact!=saved)return 9;
+    // A compact starts table with a structurally bounded segment record immediately
+    // following the offset array. Do not simulate tight packing by overlapping
+    // the import payload with a segment record.
+    auto packed = compact;
+    memset(packed.data()+blob, 0, 0x80);
+    put32(packed,256,0x5000);
+    put32(packed,blob+4,28);   // starts_offset
+    put32(packed,blob+8,64);   // imports_offset; zero imports
+    put32(packed,blob+12,64);  // symbols_offset
+    put32(packed,blob+20,1);   // DYLD_CHAINED_IMPORT
+    put32(packed,blob+28,2);   // original segment count
+    put32(packed,blob+32,12);  // record begins exactly at end of offset array
+    const size_t rec = blob+40;
+    put32(packed,rec,24);      // fixed record plus one page_start
+    const uint16_t pageSize=0x4000, pointerFormat=6, pageCount=1, noStart=0xffff;
+    memcpy(packed.data()+rec+4,&pageSize,2);
+    memcpy(packed.data()+rec+6,&pointerFormat,2);
+    memcpy(packed.data()+rec+20,&pageCount,2);
+    memcpy(packed.data()+rec+22,&noStart,2);
+    const auto packedOriginal=packed;
+    why=nullptr;
+    if(znmacho::shiftLinkedit(packed.data(),packed.size(),0x4000,0x4000,&why,1)){
+        fprintf(stderr,"compact record unexpectedly accepted by fixed-capacity relocation\n");
+        return 12;
+    }
+    if(!why||strcmp(why,"LC_DYLD_CHAINED_FIXUPS starts table lacks insertion slack")){
+        fprintf(stderr,"compact record: unexpected rejection: %s\n",why?why:"?");
+        return 13;
+    }
+    if(packed!=packedOriginal)return 14;
+    std::puts("PASS compact starts record: exact rejection and byte-for-byte atomicity");
     std::puts("PASS chained-fixups padded starts reconstruction and compact rejection");
     std::puts("PASS chained-fixups rejection is atomic; ordinary relocation unchanged");
     return 0;
