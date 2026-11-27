@@ -128,6 +128,24 @@ int main(){
         return 13;
     }
     if(packed!=packedOriginal)return 14;
+    // Bounds of the existing array must be checked independently of the proposed growth.
+    auto truncated = packedOriginal;
+    put32(truncated,260,36); // starts_offset=28; only one of two offsets fits
+    auto truncatedOriginal=truncated;
+    why=nullptr;
+    if(znmacho::shiftLinkedit(truncated.data(),truncated.size(),0x4000,0x4000,&why,1))return 15;
+    if(!why||strcmp(why,"LC_DYLD_CHAINED_FIXUPS segment table mismatch")||
+       truncated!=truncatedOriginal)return 16;
+    for(size_t field : {size_t(8),size_t(12)}){
+        auto invalid = packedOriginal;
+        put32(invalid,blob+field,0x81); // payload length is 0x80
+        auto invalidOriginal=invalid;
+        why=nullptr;
+        if(znmacho::shiftLinkedit(invalid.data(),invalid.size(),0x4000,0x4000,&why,1))return 17;
+        if(!why||strcmp(why,"LC_DYLD_CHAINED_FIXUPS imports/symbols offset outside payload")||
+           invalid!=invalidOriginal)return 18;
+    }
+    std::puts("PASS chained-fixups existing array and payload offsets are bounded");
     std::puts("PASS compact starts record: exact rejection and byte-for-byte atomicity");
     std::puts("PASS chained-fixups padded starts reconstruction and compact rejection");
     std::puts("PASS chained-fixups rejection is atomic; ordinary relocation unchanged");

@@ -117,7 +117,7 @@ inline bool shiftLinkedit(uint8_t *p,uint64_t size,uint64_t threshold,uint64_t d
         uint64_t starts=at+startsOffset;
         uint32_t oldCount=read<uint32_t>(p,starts);
         if(oldCount!=segmentCount-insertedSegments||oldCount<1||
-           !ZNCheckedRange64(length,startsOffset,4ull+4ull*segmentCount)||
+           !ZNCheckedRange64(length,startsOffset,4ull+4ull*oldCount)||
            read<uint32_t>(p,starts+4ull*oldCount)!=0){
             if(error)*error="LC_DYLD_CHAINED_FIXUPS segment table mismatch";
             return false;
@@ -143,6 +143,10 @@ inline bool shiftLinkedit(uint8_t *p,uint64_t size,uint64_t threshold,uint64_t d
         }
         for(unsigned field:{8u,12u}){
             uint32_t off=read<uint32_t>(p,at+field);
+            if(off>length){
+                if(error)*error="LC_DYLD_CHAINED_FIXUPS imports/symbols offset outside payload";
+                return false;
+            }
             if(off&&off<first)first=off;
         }
         if(newEnd>first){
