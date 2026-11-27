@@ -1,5 +1,5 @@
 #import "ZNRuntimeOnlyBinaryBuilder.h"
-#include "ZNMachOFile.h"
+#include "ZNChainedStartsGrowth.h"
 #import "ZNBinaryPatchWorkspace.h"
 #import "ZNStaticPatchFormat.h"
 #import "ZNGeneratedDataLayout.h"
@@ -83,6 +83,12 @@ static BOOL ZNRBBuildTarget(NSString *target, NSString *folder, NSString **outPa
     NSFileManager *fm = NSFileManager.defaultManager; [fm removeItemAtPath:outputPath error:nil]; NSError *copyError = nil;
     if (![fm copyItemAtPath:inputPath toPath:outputPath error:&copyError]) { if (error) *error = [NSString stringWithFormat:@"Runtime-only Builder：复制目标失败：%@", copyError.localizedDescription ?: @"未知错误"]; return NO; }
     int fd = open(outputPath.fileSystemRepresentation, O_RDWR); if (fd < 0) { [fm removeItemAtPath:outputPath error:nil]; if (error) *error = @"Runtime-only Builder：打开输出失败"; return NO; }
+    const char *growthError = nullptr;
+    if(!znmacho::reserveChainedStartsInCopy(fd,1,&growthError)){
+        close(fd); [fm removeItemAtPath:outputPath error:nil];
+        if(error)*error=[NSString stringWithFormat:@"Runtime-only Builder：%@",[NSString stringWithUTF8String:growthError?growthError:"Chained starts preflight failed"]];
+        return NO;
+    }
     struct stat st = {}; if (fstat(fd, &st) != 0 || st.st_size <= 0) { close(fd); [fm removeItemAtPath:outputPath error:nil]; if (error) *error = @"Runtime-only Builder：输出大小无效"; return NO; }
     uint64_t oldSize=(uint64_t)st.st_size; uint8_t *oldBase=(uint8_t *)mmap(NULL,(size_t)oldSize,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0); if(oldBase==MAP_FAILED){close(fd);[fm removeItemAtPath:outputPath error:nil];if(error)*error=@"Runtime-only Builder：mmap 原始输出失败";return NO;}
     ZNRBLayout layout={}; NSString *localError=nil; BOOL parsed=ZNRBParse(oldBase,(size_t)oldSize,&layout,&localError); munmap(oldBase,(size_t)oldSize); if(!parsed){close(fd);[fm removeItemAtPath:outputPath error:nil];if(error)*error=localError;return NO;}

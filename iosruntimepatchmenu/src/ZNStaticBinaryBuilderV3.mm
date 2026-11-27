@@ -1,5 +1,5 @@
 #import "ZNStaticBinaryBuilder.h"
-#include "ZNMachOFile.h"
+#include "ZNChainedStartsGrowth.h"
 #import "ZNStaticBinaryBuilderV3Internal.h"
 #import "ZNBinaryPatchWorkspace.h"
 #import "ZNPatchRuntimeValidator.h"
@@ -712,6 +712,12 @@ static BOOL ZNV3BuildTarget(NSString *target,
 
     int fd = open(outputPath.fileSystemRepresentation, O_RDWR);
     if (fd < 0) { [fm removeItemAtPath:outputPath error:nil]; if(error)*error=[NSString stringWithFormat:@"打开输出文件失败：errno=%d",errno]; return NO; }
+    const char *growthError = nullptr;
+    if (!znmacho::reserveChainedStartsInCopy(fd,2,&growthError)) {
+        close(fd); [fm removeItemAtPath:outputPath error:nil];
+        if(error)*error=[NSString stringWithUTF8String:growthError?growthError:"Chained starts preflight failed"];
+        return NO;
+    }
     struct stat st = {};
     if (fstat(fd,&st)!=0 || st.st_size<=0) { close(fd); [fm removeItemAtPath:outputPath error:nil]; if(error)*error=@"读取输出文件大小失败"; return NO; }
     uint64_t oldFileSize = (uint64_t)st.st_size;

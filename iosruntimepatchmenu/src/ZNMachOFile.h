@@ -89,8 +89,8 @@ inline bool findSection(const File &f,const char *segment,const char *section,Se
 }
 struct Patch { uint64_t offset,value; unsigned width; };
 // Preflight every field before writing any byte: overflow never leaves a partial edit.
-// Supports only a provably padded chained-starts table. Compact payloads
-// are rejected until a full payload relocation is available.
+// Consumes a provably padded chained-starts table. Compact payloads are first
+// expanded in the disposable file copy by ZNChainedStartsGrowth.h.
 inline bool shiftLinkedit(uint8_t *p,uint64_t size,uint64_t threshold,uint64_t delta,
                           const char **error=nullptr,uint32_t insertedSegments=0) {
     File f; if(!parse(p,size,f,error))return false;
