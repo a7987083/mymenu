@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #include <cmath>
 #import "ZNCustomerAdapter.h"
+#import "ZNCustomerReceiverLifecycle.h"
 
 @interface ZNCustomerWindow : UIWindow
 @end
@@ -12,6 +13,8 @@
     if(![super pointInside:point withEvent:event]) return NO;
     UIView *root=self.rootViewController.view;
     if(!root)return NO;
+    // A presented Customer modal must receive touches outside the small panel.
+    if(self.rootViewController.presentedViewController)return YES;
     UIView *panel=[root viewWithTag:0x5A4E];
     if(!panel || panel.hidden || panel.alpha<=0.01 || !panel.userInteractionEnabled)return NO;
     CGPoint local=[self convertPoint:point toView:panel];
@@ -320,26 +323,94 @@
         [self showToast:[NSString stringWithFormat:@"%@%@失败：%@",functionName,verb,reason] success:NO];
     }
 }
+- (void)restoreGameInputAfterReceiverSelection {
+    UIWindow *game=self.gameWindow;
+    if(game && !game.hidden && self.view.window.isKeyWindow)[game makeKeyWindow];
+}
+- (void)performCustomerOperation:(BOOL (^)(NSString **))operation
+                       identifier:(NSString *)identifier
+                             verb:(NSString *)verb
+                  reloadOnSuccess:(BOOL)reloadOnSuccess
+                  reloadOnFailure:(BOOL)reloadOnFailure {
+    if(self.presentedViewController)return;
+    NSString *err=nil;
+    BOOL success=NO;
+    ZNCustomerReceiverRequest *request=nil;
+    ZNCustomerBeginReceiverSelectionCapture();
+    @try {
+        success=operation(&err);
+    } @finally {
+        request=ZNCustomerEndReceiverSelectionCapture();
+    }
+    if(success || !request || ![err hasPrefix:@"FAILED_INSTANCE_AMBIGUOUS"]) {
+        [self reportResult:success identifier:identifier verb:verb error:err];
+        if(success && reloadOnSuccess){[self.view endEditing:YES];[self reload];}
+        if(!success && reloadOnFailure)[self reload];
+        return;
+    }
+    // The runtime rejected the call before invoking the target method.
+    // Leave its previous control value visible while waiting for selection.
+    if(reloadOnFailure)[self reload];
+    [self.view endEditing:YES];
+    NSString *selectionError=nil;
+    if(![request prepareChoices:&selectionError]) {
+        [self reportResult:NO identifier:identifier verb:verb error:selectionError];
+        return;
+    }
+    NSString *message=[NSString stringWithFormat:@"%@!%@.%@\n检测到 %lu 个候选实例。请选择一次；当前会话内复用，失效后重新选择。",
+        request.assembly,request.namespaceName,request.className,(unsigned long)request.choices.count];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"选择目标实例"
+        message:message preferredStyle:UIAlertControllerStyleAlert];
+    __weak ZNCustomerController *weakSelf=self;
+    for(ZNCustomerReceiverChoice *choice in request.choices) {
+        [alert addAction:[UIAlertAction actionWithTitle:choice.displayTitle style:UIAlertActionStyleDefault
+            handler:^(__unused UIAlertAction *action){
+                ZNCustomerController *owner=weakSelf;
+                if(!owner)return;
+                [owner restoreGameInputAfterReceiverSelection];
+                if(!owner.view.window||owner.view.window.hidden)return;
+                NSString *choiceError=nil;
+                if(![request selectChoice:choice error:&choiceError]) {
+                    [owner reportResult:NO identifier:identifier verb:verb error:choiceError];
+                    [owner reload];
+                    return;
+                }
+                NSString *retryError=nil;
+                BOOL retrySuccess=operation(&retryError);
+                [owner reportResult:retrySuccess identifier:identifier verb:verb error:retryError];
+                [owner reload];
+            }]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel
+        handler:^(__unused UIAlertAction *action){
+            ZNCustomerController *owner=weakSelf;
+            [owner restoreGameInputAfterReceiverSelection];
+            [owner reload];
+        }]];
+    UIWindow *overlay=self.view.window;
+    if(!overlay||overlay.hidden)return;
+    [overlay makeKeyWindow];
+    [self presentViewController:alert animated:YES completion:nil];
+}
 - (void)switchChanged:(UISwitch *)sender {
     NSString *identifier=sender.accessibilityIdentifier?:@"";
     BOOL enabled=sender.on;
-    NSString *err=nil;
-    BOOL success=[[ZNCustomerAdapter shared]setEnabled:enabled identifier:identifier error:&err];
-    if(!success)sender.on=!enabled;
-    [self reportResult:success identifier:identifier verb:enabled?@"开启":@"关闭" error:err];
+    [self performCustomerOperation:^BOOL(NSString **error){
+        return [[ZNCustomerAdapter shared] setEnabled:enabled identifier:identifier error:error];
+    } identifier:identifier verb:enabled?@"开启":@"关闭" reloadOnSuccess:NO reloadOnFailure:YES];
 }
 - (void)executePressed:(UIButton *)sender {
     NSString *identifier=sender.accessibilityIdentifier?:@"";
-    NSString *err=nil;
-    BOOL success=[[ZNCustomerAdapter shared]execute:identifier value:nil error:&err];
-    [self reportResult:success identifier:identifier verb:@"执行" error:err];
+    [self performCustomerOperation:^BOOL(NSString **error){
+        return [[ZNCustomerAdapter shared] execute:identifier value:nil error:error];
+    } identifier:identifier verb:@"执行" reloadOnSuccess:NO reloadOnFailure:NO];
 }
 - (void)sliderChanged:(UISlider *)sender {
     NSString *identifier=sender.accessibilityIdentifier?:@"";
-    NSString *err=nil;
-    BOOL success=[[ZNCustomerAdapter shared]execute:identifier value:@(sender.value) error:&err];
-    [self reportResult:success identifier:identifier verb:@"执行" error:err];
-    if(!success)[self reload];
+    NSNumber *value=@(sender.value);
+    [self performCustomerOperation:^BOOL(NSString **error){
+        return [[ZNCustomerAdapter shared] execute:identifier value:value error:error];
+    } identifier:identifier verb:@"执行" reloadOnSuccess:NO reloadOnFailure:YES];
 }
 - (BOOL)textFieldShouldBeginEditing:(UITextField *)field {
     (void)field;
@@ -370,12 +441,10 @@
         [self reportResult:NO identifier:identifier verb:@"执行" error:@"请输入有效的有限数值"];
         return;
     }
-    NSString *err=nil;
-    BOOL success=[[ZNCustomerAdapter shared] execute:identifier value:@(number) error:&err];
-    [self reportResult:success identifier:identifier verb:@"执行" error:err];
-    if(!success)return;
-    [self.view endEditing:YES];
-    [self reload];
+    NSNumber *value=@(number);
+    [self performCustomerOperation:^BOOL(NSString **error){
+        return [[ZNCustomerAdapter shared] execute:identifier value:value error:error];
+    } identifier:identifier verb:@"执行" reloadOnSuccess:YES reloadOnFailure:NO];
 }
 - (void)closePressed { if(self.onClose)self.onClose(); }
 - (void)drag:(UIPanGestureRecognizer *)gesture {
@@ -405,6 +474,8 @@
 @implementation ZNCustomerHost
 + (instancetype)shared {static ZNCustomerHost *s;static dispatch_once_t once;dispatch_once(&once,^{s=[ZNCustomerHost new];});return s;}
 - (void)hideMenu {
+    if(self.controller.presentedViewController)
+        [self.controller dismissViewControllerAnimated:NO completion:nil];
     [self.controller.view endEditing:YES];
     [self.controller dismissToast];
     UIWindow *game=self.source;
